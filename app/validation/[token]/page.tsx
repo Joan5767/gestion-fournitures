@@ -46,13 +46,13 @@ export default function PageValidationClient() {
           const estRefuse = articlesRefuses.includes(item.id);
           const { error: errFourniture } = await supabase.from("fournitures").update({ 
             refuse: estRefuse,
-            est_valide: true // L'article est désormais verrouillé, qu'il soit refusé ou accepté
+            est_valide: true 
           }).eq("id", item.id);
 
           if (errFourniture) {
             alert(`Erreur technique sur l'article "${item.designation}" : ${errFourniture.message}`);
             setValidationEnCours(false);
-            return; // On stoppe tout si ça plante
+            return;
           }
         }
       }
@@ -68,6 +68,13 @@ export default function PageValidationClient() {
         setValidationEnCours(false);
         return;
       }
+
+      // 3. Envoyer l'e-mail instantané à l'artisan via Resend
+      await fetch("/api/notifier-validation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nomClient: chantier.nom_client }),
+      });
 
       alert("Vos choix ont été enregistrés avec succès !");
       window.location.reload();
