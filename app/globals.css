@@ -25,6 +25,7 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
-html {
-  color-scheme: light only;
+/* On force le texte à être noir profond, partout */
+body, h1, h2, h3, p, span, div, input, textarea {
+  color: #000000 !important;
 }
