@@ -69,11 +69,14 @@ export default function PageValidationClient() {
         return;
       }
 
-      // 3. Envoyer l'e-mail instantané à l'artisan via Resend
+      // 3. Envoyer l'e-mail instantané personnalisé à l'artisan via Resend
       await fetch("/api/notifier-validation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nomClient: chantier.nom_client }),
+        body: JSON.stringify({ 
+          nomClient: chantier.nom_client,
+          nomChantier: chantier.nom_chantier || chantier.nom_client // Ajustez si votre colonne s'appelle autrement
+        }),
       });
 
       alert("Vos choix ont été enregistrés avec succès !");
