@@ -1,69 +1,127 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import Link from "next/link";
+
+export default function TableauDeBord() {
+  const [chantiers, setChantiers] = useState<any[]>([]);
+  const [nomClient, setNomClient] = useState("");
+  const [adresseClient, setAdresseClient] = useState("");
+
+  useEffect(() => {
+    fetchChantiers();
+  }, []);
+
+  async function fetchChantiers() {
+    const { data, error } = await supabase
+      .from("chantiers")
+      .select("*")
+      .order("created_at", { ascending: false });
+    
+    if (data) setChantiers(data);
+  }
+
+  async function creerChantier(e: React.FormEvent) {
+    e.preventDefault();
+    const { error } = await supabase
+      .from("chantiers")
+      .insert([{ nom_client: nomClient, adresse_client: adresseClient }]);
+
+    if (error) {
+      alert("Erreur Supabase : " + error.message);
+      console.error(error);
+      return;
+    }
+    
+    setNomClient("");
+    setAdresseClient("");
+    fetchChantiers();
+  }
+
+  async function supprimerChantier(id: string) {
+    // Sécurité : On demande confirmation avant de tout effacer
+    const confirmation = window.confirm("Êtes-vous sûr de vouloir supprimer définitivement ce chantier ? Cette action est irréversible.");
+    if (!confirmation) return;
+
+    // 1. On supprime d'abord les fournitures associées pour ne pas créer de conflit
+    await supabase.from("fournitures").delete().eq("chantier_id", id);
+    
+    // 2. On supprime ensuite le chantier lui-même
+    const { error } = await supabase.from("chantiers").delete().eq("id", id);
+    
+    if (error) {
+      alert("Erreur lors de la suppression : " + error.message);
+    } else {
+      fetchChantiers(); // On rafraîchit la liste pour faire disparaître la ligne
+    }
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+    <div className="p-8 max-w-5xl mx-auto">
+      <h1 className="text-3xl font-bold mb-8">Mes Chantiers</h1>
+      
+      <div className="bg-gray-100 p-6 rounded-lg mb-8 border border-gray-200">
+        <h2 className="text-xl font-semibold mb-4">Créer un nouveau chantier</h2>
+        <form onSubmit={creerChantier} className="flex gap-4 flex-wrap">
+          <input 
+            type="text" 
+            placeholder="Nom du client *" 
+            className="border p-2 rounded flex-1 min-w-[200px]"
+            value={nomClient}
+            onChange={(e) => setNomClient(e.target.value)}
+            required
+          />
+          <input 
+            type="text" 
+            placeholder="Adresse du chantier (optionnel)" 
+            className="border p-2 rounded flex-1 min-w-[200px]"
+            value={adresseClient}
+            onChange={(e) => setAdresseClient(e.target.value)}
+          />
+          <button type="submit" className="bg-black text-white px-6 py-2 rounded font-bold hover:bg-gray-800">
+            Créer
+          </button>
+        </form>
+      </div>
+
+      <div className="grid gap-4">
+        {chantiers.map((chantier) => (
+          <div key={chantier.id} className="border p-4 rounded-lg flex justify-between items-center shadow-sm bg-white">
+            <div>
+              <h3 className="font-bold text-lg">{chantier.nom_client}</h3>
+              {chantier.adresse_client && (
+                <p className="text-sm text-gray-500 mb-2 mt-1">📍 {chantier.adresse_client}</p>
+              )}
+              {!chantier.adresse_client && <div className="mb-2 mt-1"></div>}
+              
+              <span className={`text-xs font-bold px-2 py-1 rounded ${
+                chantier.statut === 'brouillon' ? 'bg-gray-200 text-gray-800' : 
+                chantier.statut === 'valide' ? 'bg-green-200 text-green-800' : 
+                chantier.statut === 'commande_passee' ? 'bg-blue-200 text-blue-800' : 'bg-yellow-200 text-yellow-800'
+              }`}>
+                {chantier.statut.toUpperCase()}
+              </span>
+            </div>
+            
+            <div className="flex items-center gap-3">
+              <Link href={`/chantier/${chantier.id}`} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 font-medium text-sm">
+                Gérer les fournitures
+              </Link>
+              <button 
+                onClick={() => supprimerChantier(chantier.id)}
+                className="text-red-500 hover:text-white border border-red-500 hover:bg-red-600 px-3 py-2 rounded font-bold transition-colors"
+                title="Supprimer ce chantier"
+              >
+                🗑️
+              </button>
+            </div>
+          </div>
+        ))}
+        {chantiers.length === 0 && (
+          <p className="text-gray-500 italic">Aucun chantier pour le moment.</p>
+        )}
+      </div>
     </div>
   );
 }

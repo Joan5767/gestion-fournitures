@@ -1,0 +1,240 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import { useParams } from "next/navigation";
+import Link from "next/link";
+
+export default function PageChantier() {
+  const params = useParams();
+  const id = params.id as string;
+
+  const [chantier, setChantier] = useState<any>(null);
+  const [fournitures, setFournitures] = useState<any[]>([]);
+  
+  const [designation, setDesignation] = useState("");
+  const [quantite, setQuantite] = useState("");
+  const [fournisseur, setFournisseur] = useState("");
+  const [reference, setReference] = useState("");
+  const [lien, setLien] = useState("");
+  const [fichierPhoto, setFichierPhoto] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+
+  useEffect(() => {
+    if (id) fetchChantierEtFournitures();
+  }, [id]);
+
+  async function fetchChantierEtFournitures() {
+    const { data: chantierData } = await supabase.from("chantiers").select("*").eq("id", id).single();
+    if (chantierData) setChantier(chantierData);
+
+    const { data: fournituresData } = await supabase.from("fournitures").select("*").eq("chantier_id", id).order("created_at", { ascending: true });
+    if (fournituresData) setFournitures(fournituresData);
+  }
+
+  async function ajouterFourniture(e: React.FormEvent) {
+    e.preventDefault();
+    setIsUploading(true);
+    let photoUrlFinal = "";
+
+    if (fichierPhoto) {
+      const fileExt = fichierPhoto.name.split('.').pop();
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+      const { error: uploadError } = await supabase.storage.from('photos').upload(fileName, fichierPhoto);
+      
+      if (!uploadError) {
+        const { data } = supabase.storage.from('photos').getPublicUrl(fileName);
+        photoUrlFinal = data.publicUrl;
+      }
+    }
+
+    const { error } = await supabase.from("fournitures").insert([{ 
+      chantier_id: id, designation, quantite, fournisseur, reference, lien, photo_url: photoUrlFinal 
+    }]);
+
+    if (!error) {
+      if (chantier.statut === "valide" || chantier.statut === "commande_passee") {
+        await supabase.from("chantiers").update({ statut: "brouillon" }).eq("id", id);
+        alert("Article ajouté ! Le chantier repasse en 'Brouillon' pour que le client valide cet ajout.");
+      }
+      
+      setDesignation(""); setQuantite(""); setFournisseur(""); setReference(""); setLien(""); setFichierPhoto(null);
+      const fileInput = document.getElementById('photo-upload') as HTMLInputElement;
+      if (fileInput) fileInput.value = '';
+      fetchChantierEtFournitures();
+    } else {
+      alert("Erreur lors de l'ajout.");
+    }
+    setIsUploading(false);
+  }
+
+  async function marquerArticleCommande(idFourniture: string, statutActuel: boolean) {
+    const { error } = await supabase
+      .from("fournitures")
+      .update({ commande_passee: !statutActuel })
+      .eq("id", idFourniture);
+    
+    if (!error) {
+      fetchChantierEtFournitures();
+    } else {
+      alert("Erreur lors de la mise à jour de l'article.");
+    }
+  }
+
+  async function marquerCommandePassee() {
+    const { error } = await supabase.from("chantiers").update({ statut: "commande_passee" }).eq("id", id);
+    if (!error) { fetchChantierEtFournitures(); alert("Dossier clôturé. Le harcèlement par email est arrêté !"); }
+  }
+
+  const formaterDate = (dateString: string) => {
+    if (!dateString) return "";
+    return new Date(dateString).toLocaleString("fr-FR", {
+      day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"
+    });
+  };
+
+  const exporterVersExcel = () => {
+    const enTetes = ["Fournisseur", "Article", "Reference", "Quantite", "Lien", "Photo", "Statut", "Date de validation", "Commandé chez le fournisseur"];
+    
+    const dateVal = (chantier.statut === "valide" || chantier.statut === "commande_passee") && chantier.date_validation 
+      ? formaterDate(chantier.date_validation) 
+      : "En attente";
+
+    const lignes = fournitures.map(f => [
+      `"${(f.fournisseur || "").replace(/"/g, '""')}"`,
+      `"${f.designation.replace(/"/g, '""')}"`,
+      `"${(f.reference || "").replace(/"/g, '""')}"`,
+      `"${f.quantite.replace(/"/g, '""')}"`,
+      `"${(f.lien || "").replace(/"/g, '""')}"`,
+      `"${(f.photo_url || "").replace(/"/g, '""')}"`,
+      f.refuse ? "Refusé" : "Validé",
+      `"${dateVal}"`,
+      f.commande_passee ? "Oui" : "Non" // Ajout de l'info dans l'export
+    ]);
+    
+    const csvContent = [enTetes.join(";"), ...lignes.map(l => l.join(";"))].join("\n");
+    const blob = new Blob(["\ufeff" + csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `Fournitures_${chantier.nom_client.replace(/\s+/g, '_')}.csv`;
+    link.click();
+  };
+
+  if (!chantier) return <div className="p-8 font-bold">Chargement...</div>;
+  const lienValidation = typeof window !== "undefined" ? `${window.location.origin}/validation/${chantier.token_validation}` : "";
+
+  return (
+    <div className="p-8 max-w-6xl mx-auto">
+      <Link href="/" className="text-gray-500 hover:text-black mb-6 inline-block font-bold">&larr; Retour</Link>
+      
+      <div className="flex justify-between items-start mb-8 pb-4 border-b">
+        <div>
+          <h1 className="text-3xl font-bold">{chantier.nom_client}</h1>
+          <p className="text-gray-600 mt-1">STATUT : <strong className="uppercase">{chantier.statut}</strong></p>
+        </div>
+        <div className="text-right flex flex-col items-end gap-2">
+           <button onClick={exporterVersExcel} className="bg-green-600 text-white px-4 py-2 rounded font-bold hover:bg-green-700">📊 Exporter Excel</button>
+           {(chantier.statut === "valide" || chantier.statut === "commande_passee") && chantier.date_validation && (
+            <div className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded border mt-2">
+              🔒 Validé le : <strong>{formaterDate(chantier.date_validation)}</strong>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="bg-white p-6 rounded-lg border border-gray-200 h-fit">
+          <h2 className="text-xl font-semibold mb-4">Ajouter un article</h2>
+          <form onSubmit={ajouterFourniture} className="grid grid-cols-2 gap-4">
+            <input type="text" placeholder="Article *" className="border p-3 rounded col-span-2" value={designation} onChange={(e) => setDesignation(e.target.value)} required />
+            <input type="text" placeholder="Quantité *" className="border p-3 rounded" value={quantite} onChange={(e) => setQuantite(e.target.value)} required />
+            <input type="text" placeholder="Fournisseur" className="border p-3 rounded" value={fournisseur} onChange={(e) => setFournisseur(e.target.value)} />
+            <input type="text" placeholder="Référence" className="border p-3 rounded" value={reference} onChange={(e) => setReference(e.target.value)} />
+            <input type="url" placeholder="Lien URL de l'article" className="border p-3 rounded" value={lien} onChange={(e) => setLien(e.target.value)} />
+            <div className="col-span-2">
+              <label className="block text-sm text-gray-600 mb-1">Photo (optionnelle)</label>
+              <input id="photo-upload" type="file" accept="image/*" className="border p-2 rounded w-full" onChange={(e) => setFichierPhoto(e.target.files ? e.target.files[0] : null)} />
+            </div>
+            <button type="submit" disabled={isUploading} className="bg-black text-white py-3 rounded font-bold col-span-2 hover:bg-gray-800 disabled:bg-gray-400">
+              {isUploading ? "Enregistrement..." : "Ajouter à la liste"}
+            </button>
+          </form>
+        </div>
+
+        <div>
+          <div className="bg-gray-50 p-6 rounded-lg border border-gray-200 mb-6">
+            <h2 className="text-xl font-semibold mb-4">Liste actuelle</h2>
+            {fournitures.length === 0 ? <p className="text-gray-500 italic">Vide.</p> : (
+              <ul className="space-y-4">
+                {fournitures.map((item) => (
+                  <li key={item.id} className={`flex flex-col p-4 border rounded shadow-sm ${item.refuse ? "bg-red-50 border-red-200" : "bg-white"}`}>
+                    <div className="flex gap-4">
+                      {item.photo_url && (
+                        <img src={item.photo_url} alt="Photo" className={`w-20 h-20 object-cover rounded border ${item.refuse ? "opacity-50 grayscale" : ""}`} />
+                      )}
+                      <div className="flex-1">
+                        <div className="flex justify-between items-start">
+                          <span className={`font-bold ${item.refuse ? "line-through text-red-500" : ""}`}>
+                            {item.designation} 
+                            {item.est_valide && <span className="ml-2 text-xs bg-green-100 text-green-700 px-2 py-1 rounded">✅ Validé</span>}
+                          </span>
+                          <span className="font-black bg-gray-100 px-2 py-1 rounded text-sm">{item.quantite}</span>
+                        </div>
+                        <div className="text-sm text-gray-600 mt-1 flex flex-wrap gap-x-4 gap-y-1">
+                          {item.fournisseur && <span>🛒 {item.fournisseur}</span>}
+                          {item.reference && <span>🏷️ Ref: {item.reference}</span>}
+                          {item.lien && <a href={item.lien} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline">🔗 Voir le produit</a>}
+                        </div>
+                        {item.refuse && <span className="text-xs font-bold text-red-600 block mt-2">❌ REFUSÉ</span>}
+                      </div>
+                    </div>
+                    
+                    {/* Bouton individuel de commande (affiché uniquement si l'article est validé par le client et non refusé) */}
+                    {item.est_valide && !item.refuse && (
+                      <div className="mt-4 pt-3 border-t flex justify-between items-center">
+                        <span className="text-sm font-medium text-gray-600">État de la commande :</span>
+                        <button
+                          onClick={() => marquerArticleCommande(item.id, item.commande_passee)}
+                          className={`px-4 py-1.5 text-sm font-bold rounded transition-colors ${
+                            item.commande_passee 
+                              ? "bg-blue-600 text-white hover:bg-blue-700" 
+                              : "bg-gray-200 text-gray-800 hover:bg-gray-300"
+                          }`}
+                        >
+                          {item.commande_passee ? "✅ Commandé" : "⏳ À commander"}
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          
+          {chantier.statut === "valide" && (
+            <div className="mt-6 p-6 border rounded-lg bg-green-50 border-green-200 text-center">
+               <p className="text-sm text-green-800 mb-3">Toutes les fournitures ont été commandées ?</p>
+               <button onClick={marquerCommandePassee} className="w-full bg-green-600 text-white py-3 rounded font-bold hover:bg-green-700">
+                Clôturer les commandes (Arrêter les rappels)
+              </button>
+            </div>
+          )}
+          
+          <div className="mt-6">
+            <p className="text-sm font-bold mb-2">Lien client :</p>
+            <input type="text" readOnly value={lienValidation} className="w-full border p-2 text-sm bg-gray-100" />
+            <button 
+              onClick={() => {
+                navigator.clipboard.writeText(lienValidation);
+                alert("Lien copié !");
+              }}
+              className="mt-2 w-full bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700"
+            >
+              Copier le lien
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
