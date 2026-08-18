@@ -1,0 +1,47 @@
+[33mcommit d3e10917fdf00b52f93a7e49d7bf942cc9770cc4[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m
+Author: Joan Windstein <joanw.2hr@gmail.com>
+Date:   Tue Aug 18 14:02:02 2026 +0200
+
+    Mise à jour page client et design
+
+[33mcommit ee5b04fcf1e2321591b87a0bc9419977a5a173a7[m
+Author: Joan Windstein <joanw.2hr@gmail.com>
+Date:   Tue Aug 18 13:57:05 2026 +0200
+
+    Mise en page mobile photos et textes
+
+[33mcommit 6206d5477d3f642c6e0194221faab07df2bc9562[m
+Author: Joan Windstein <joanw.2hr@gmail.com>
+Date:   Tue Aug 18 13:54:28 2026 +0200
+
+    Suppression totale du mode sombre
+
+[33mcommit 504176b36c22068f68a629ee6016230446ebfb96[m
+Author: Joan Windstein <joanw.2hr@gmail.com>
+Date:   Tue Aug 18 13:48:01 2026 +0200
+
+    Correction contraste accueil
+
+[33mcommit f93777e5c05b9cfe5bba2961ee75d80e844b9a4a[m
+Author: Joan Windstein <joanw.2hr@gmail.com>
+Date:   Tue Aug 18 13:40:17 2026 +0200
+
+    Correction contraste mobile et lisibilité
+
+[33mcommit ef2e020238c7fdd09af2f7d38c6398fa57a19ef0[m
+Author: Joan Windstein <joanw.2hr@gmail.com>
+Date:   Tue Aug 18 13:38:24 2026 +0200
+
+    Ajout glisser-deposer photo
+
+[33mcommit a3ae5df0b181c275f60777664778f4dfe863cbc5[m
+Author: Joan Windstein <joanw.2hr@gmail.com>
+Date:   Tue Aug 18 12:32:16 2026 +0200
+
+    Version finale application
+
+[33mcommit daefb513e84ced81ff6dfeaf9055af0f9d6ab823[m
+Author: Joan Windstein <joanw.2hr@gmail.com>
+Date:   Mon Aug 17 13:14:50 2026 +0200
+
+    Initial commit from Create Next App
