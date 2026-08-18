@@ -19,6 +19,7 @@ export default function PageChantier() {
   const [lien, setLien] = useState("");
   const [fichierPhoto, setFichierPhoto] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
 
   useEffect(() => {
     if (id) fetchChantierEtFournitures();
@@ -31,6 +32,29 @@ export default function PageChantier() {
     const { data: fournituresData } = await supabase.from("fournitures").select("*").eq("chantier_id", id).order("created_at", { ascending: true });
     if (fournituresData) setFournitures(fournituresData);
   }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const file = e.dataTransfer.files[0];
+      if (file.type.startsWith("image/")) {
+        setFichierPhoto(file);
+      } else {
+        alert("Veuillez déposer un fichier image.");
+      }
+    }
+  };
 
   async function ajouterFourniture(e: React.FormEvent) {
     e.preventDefault();
@@ -59,8 +83,6 @@ export default function PageChantier() {
       }
       
       setDesignation(""); setQuantite(""); setFournisseur(""); setReference(""); setLien(""); setFichierPhoto(null);
-      const fileInput = document.getElementById('photo-upload') as HTMLInputElement;
-      if (fileInput) fileInput.value = '';
       fetchChantierEtFournitures();
     } else {
       alert("Erreur lors de l'ajout.");
@@ -109,7 +131,7 @@ export default function PageChantier() {
       `"${(f.photo_url || "").replace(/"/g, '""')}"`,
       f.refuse ? "Refusé" : "Validé",
       `"${dateVal}"`,
-      f.commande_passee ? "Oui" : "Non" // Ajout de l'info dans l'export
+      f.commande_passee ? "Oui" : "Non"
     ]);
     
     const csvContent = [enTetes.join(";"), ...lignes.map(l => l.join(";"))].join("\n");
@@ -150,11 +172,37 @@ export default function PageChantier() {
             <input type="text" placeholder="Quantité *" className="border p-3 rounded" value={quantite} onChange={(e) => setQuantite(e.target.value)} required />
             <input type="text" placeholder="Fournisseur" className="border p-3 rounded" value={fournisseur} onChange={(e) => setFournisseur(e.target.value)} />
             <input type="text" placeholder="Référence" className="border p-3 rounded" value={reference} onChange={(e) => setReference(e.target.value)} />
-            <input type="url" placeholder="Lien URL de l'article" className="border p-3 rounded" value={lien} onChange={(e) => setLien(e.target.value)} />
+            <input type="url" placeholder="Lien URL de l'article" className="border p-3 rounded col-span-2" value={lien} onChange={(e) => setLien(e.target.value)} />
+            
+            {/* Zone de Drag & Drop pour la photo */}
             <div className="col-span-2">
               <label className="block text-sm text-gray-600 mb-1">Photo (optionnelle)</label>
-              <input id="photo-upload" type="file" accept="image/*" className="border p-2 rounded w-full" onChange={(e) => setFichierPhoto(e.target.files ? e.target.files[0] : null)} />
+              <div
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                className={`relative border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors ${
+                  isDragging ? "border-blue-500 bg-blue-50" : fichierPhoto ? "border-green-500 bg-green-50" : "border-gray-300 hover:bg-gray-50"
+                }`}
+              >
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  onChange={(e) => setFichierPhoto(e.target.files ? e.target.files[0] : null)}
+                />
+                {fichierPhoto ? (
+                  <div className="text-sm text-green-700 font-medium">
+                    📷 Photo sélectionnée : <strong>{fichierPhoto.name}</strong>
+                  </div>
+                ) : (
+                  <div className="text-sm text-gray-500">
+                    📂 <strong>Glissez-déposez une photo ici</strong> ou cliquez pour la parcourir
+                  </div>
+                )}
+              </div>
             </div>
+
             <button type="submit" disabled={isUploading} className="bg-black text-white py-3 rounded font-bold col-span-2 hover:bg-gray-800 disabled:bg-gray-400">
               {isUploading ? "Enregistrement..." : "Ajouter à la liste"}
             </button>
@@ -189,7 +237,6 @@ export default function PageChantier() {
                       </div>
                     </div>
                     
-                    {/* Bouton individuel de commande (affiché uniquement si l'article est validé par le client et non refusé) */}
                     {item.est_valide && !item.refuse && (
                       <div className="mt-4 pt-3 border-t flex justify-between items-center">
                         <span className="text-sm font-medium text-gray-600">État de la commande :</span>
