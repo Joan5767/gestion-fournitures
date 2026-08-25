@@ -14,12 +14,14 @@ export default function PageChantier() {
   const [chantier, setChantier] = useState<any>(null);
   const [fournitures, setFournitures] = useState<any[]>([]);
   
+  // NOUVEAU : État pour savoir si on modifie un article existant
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   const [designation, setDesignation] = useState("");
   const [quantite, setQuantite] = useState("");
   const [fournisseur, setFournisseur] = useState("");
   const [reference, setReference] = useState("");
   const [lien, setLien] = useState("");
-  // NOUVEAU : État pour la question de l'artisan
   const [questionArtisan, setQuestionArtisan] = useState(""); 
   const [fichierPhoto, setFichierPhoto] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -60,7 +62,32 @@ export default function PageChantier() {
     }
   };
 
-  async function ajouterFourniture(e: React.FormEvent) {
+  // NOUVEAU : Fonction pour charger les données d'un article dans le formulaire
+  const editerFourniture = (item: any) => {
+    setEditingId(item.id);
+    setDesignation(item.designation || "");
+    setQuantite(item.quantite || "");
+    setFournisseur(item.fournisseur || "");
+    setReference(item.reference || "");
+    setLien(item.lien || "");
+    setQuestionArtisan(item.question_artisan || "");
+    setFichierPhoto(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // NOUVEAU : Fonction pour réinitialiser le formulaire
+  const annulerEdition = () => {
+    setEditingId(null);
+    setDesignation("");
+    setQuantite("");
+    setFournisseur("");
+    setReference("");
+    setLien("");
+    setQuestionArtisan("");
+    setFichierPhoto(null);
+  };
+
+  async function ajouterOuModifierFourniture(e: React.FormEvent) {
     e.preventDefault();
     setIsUploading(true);
     let photoUrlFinal = "";
@@ -76,27 +103,47 @@ export default function PageChantier() {
       }
     }
 
-    const { error } = await supabase.from("fournitures").insert([{ 
+    // Préparation des données (on réinitialise la validation en cas de modification)
+    const payload: any = { 
       chantier_id: id, 
       designation, 
       quantite, 
       fournisseur, 
       reference, 
       lien, 
-      photo_url: photoUrlFinal,
-      question_artisan: questionArtisan // NOUVEAU : Enregistrement de la question
-    }]);
+      question_artisan: questionArtisan,
+      est_valide: false, // Re-verrouillage client nécessaire
+      refuse: false
+    };
 
-    if (!error) {
+    if (photoUrlFinal) {
+      payload.photo_url = photoUrlFinal;
+    }
+
+    let erreurRequete = null;
+
+    // Si on est en mode édition, on met à jour, sinon on insère
+    if (editingId) {
+      const { error } = await supabase.from("fournitures").update(payload).eq("id", editingId);
+      erreurRequete = error;
+    } else {
+      const { error } = await supabase.from("fournitures").insert([payload]);
+      erreurRequete = error;
+    }
+
+    if (!erreurRequete) {
+      // Repasser le chantier en brouillon si ce n'est pas le cas
       if (chantier.statut === "valide" || chantier.statut === "commande_passee") {
         await supabase.from("chantiers").update({ statut: "brouillon" }).eq("id", id);
-        alert("Article ajouté ! Le chantier repasse en 'Brouillon' pour que le client valide cet ajout.");
+        alert(editingId ? "Article modifié ! Le chantier repasse en 'Brouillon'." : "Article ajouté ! Le chantier repasse en 'Brouillon'.");
+      } else if (editingId) {
+        alert("Modifications enregistrées !");
       }
       
-      setDesignation(""); setQuantite(""); setFournisseur(""); setReference(""); setLien(""); setQuestionArtisan(""); setFichierPhoto(null);
+      annulerEdition();
       fetchChantierEtFournitures();
     } else {
-      alert("Erreur lors de l'ajout.");
+      alert("Erreur lors de l'enregistrement : " + erreurRequete.message);
     }
     setIsUploading(false);
   }
@@ -139,7 +186,6 @@ export default function PageChantier() {
   };
 
   const exporterVersExcel = () => {
-    // NOUVEAU : Ajout des colonnes Question et Réponse à l'export
     const enTetes = ["Fournisseur", "Article", "Reference", "Quantite", "Question", "Réponse Client", "Lien", "Photo", "Statut", "Date de validation", "Commandé"];
     
     const dateVal = (chantier.statut === "valide" || chantier.statut === "commande_passee") && chantier.date_validation 
@@ -189,7 +235,6 @@ export default function PageChantier() {
     doc.text(`Date de validation officielle : ${dateValidation}`, 14, 36);
     doc.text("Ce document atteste l'approbation des fournitures listées ci-dessous.", 14, 42);
 
-    // NOUVEAU : Ajout de la colonne réponse au PDF
     const colonnes = ["Désignation", "Qté", "Fournisseur", "Référence", "Réponse Client"];
     const lignes = fournitures
       .filter(item => !item.refuse) 
@@ -240,16 +285,17 @@ export default function PageChantier() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="bg-white p-6 rounded-lg border border-gray-200 h-fit">
-          <h2 className="text-xl font-semibold mb-4">Ajouter un article</h2>
-          <form onSubmit={ajouterFourniture} className="grid grid-cols-2 gap-4">
-            <input type="text" placeholder="Article *" className="border p-3 rounded col-span-2" value={designation} onChange={(e) => setDesignation(e.target.value)} required />
-            <input type="text" placeholder="Quantité *" className="border p-3 rounded" value={quantite} onChange={(e) => setQuantite(e.target.value)} required />
-            <input type="text" placeholder="Fournisseur" className="border p-3 rounded" value={fournisseur} onChange={(e) => setFournisseur(e.target.value)} />
-            <input type="text" placeholder="Référence" className="border p-3 rounded" value={reference} onChange={(e) => setReference(e.target.value)} />
-            <input type="url" placeholder="Lien URL de l'article" className="border p-3 rounded col-span-2" value={lien} onChange={(e) => setLien(e.target.value)} />
+        <div className={`p-6 rounded-lg border h-fit transition-colors ${editingId ? "bg-yellow-50 border-yellow-300 shadow-md" : "bg-white border-gray-200"}`}>
+          <h2 className="text-xl font-semibold mb-4">
+            {editingId ? "✏️ Modifier l'article" : "Ajouter un article"}
+          </h2>
+          <form onSubmit={ajouterOuModifierFourniture} className="grid grid-cols-2 gap-4">
+            <input type="text" placeholder="Article *" className="border p-3 rounded col-span-2 bg-white" value={designation} onChange={(e) => setDesignation(e.target.value)} required />
+            <input type="text" placeholder="Quantité *" className="border p-3 rounded bg-white" value={quantite} onChange={(e) => setQuantite(e.target.value)} required />
+            <input type="text" placeholder="Fournisseur" className="border p-3 rounded bg-white" value={fournisseur} onChange={(e) => setFournisseur(e.target.value)} />
+            <input type="text" placeholder="Référence" className="border p-3 rounded bg-white" value={reference} onChange={(e) => setReference(e.target.value)} />
+            <input type="url" placeholder="Lien URL de l'article" className="border p-3 rounded col-span-2 bg-white" value={lien} onChange={(e) => setLien(e.target.value)} />
             
-            {/* NOUVEAU : Champ pour poser une question au client */}
             <div className="col-span-2 border-t pt-4 mt-2">
               <label className="block text-sm font-bold text-blue-800 mb-1">💬 Poser une question au client (Optionnel)</label>
               <input 
@@ -267,7 +313,7 @@ export default function PageChantier() {
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
-                className={`relative border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors ${
+                className={`relative border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors bg-white ${
                   isDragging ? "border-blue-500 bg-blue-50" : fichierPhoto ? "border-green-500 bg-green-50" : "border-gray-300 hover:bg-gray-50"
                 }`}
               >
@@ -284,14 +330,22 @@ export default function PageChantier() {
                 ) : (
                   <div className="text-sm text-gray-500">
                     📂 <strong>Glissez-déposez une photo ici</strong> ou cliquez pour la parcourir
+                    {editingId && <span className="block text-xs mt-1 text-gray-400">(Laissez vide pour conserver la photo actuelle)</span>}
                   </div>
                 )}
               </div>
             </div>
 
-            <button type="submit" disabled={isUploading} className="bg-black text-white py-3 rounded font-bold col-span-2 hover:bg-gray-800 disabled:bg-gray-400">
-              {isUploading ? "Enregistrement..." : "Ajouter à la liste"}
-            </button>
+            <div className="col-span-2 flex gap-2">
+              <button type="submit" disabled={isUploading} className="flex-1 bg-black text-white py-3 rounded font-bold hover:bg-gray-800 disabled:bg-gray-400">
+                {isUploading ? "Enregistrement..." : editingId ? "Enregistrer les modifications" : "Ajouter à la liste"}
+              </button>
+              {editingId && (
+                <button type="button" onClick={annulerEdition} className="px-6 bg-gray-300 text-black py-3 rounded font-bold hover:bg-gray-400">
+                  Annuler
+                </button>
+              )}
+            </div>
           </form>
         </div>
 
@@ -301,7 +355,7 @@ export default function PageChantier() {
             {fournitures.length === 0 ? <p className="text-gray-500 italic">Vide.</p> : (
               <ul className="space-y-4">
                 {fournitures.map((item) => (
-                  <li key={item.id} className={`flex flex-col p-4 border rounded shadow-sm ${item.refuse ? "bg-red-50 border-red-200" : "bg-white"}`}>
+                  <li key={item.id} className={`flex flex-col p-4 border rounded shadow-sm ${item.refuse ? "bg-red-50 border-red-200" : "bg-white"} ${editingId === item.id ? "border-yellow-400 ring-2 ring-yellow-200" : ""}`}>
                     <div className="flex gap-4">
                       {item.photo_url && (
                         <img src={item.photo_url} alt="Photo" className={`w-20 h-20 object-cover rounded border ${item.refuse ? "opacity-50 grayscale" : ""}`} />
@@ -314,13 +368,28 @@ export default function PageChantier() {
                           </span>
                           <div className="flex items-center gap-2">
                             <span className="font-black bg-gray-100 px-2 py-1 rounded text-sm">{item.quantite}</span>
-                            <button 
-                              onClick={() => supprimerFourniture(item.id)}
-                              className="text-red-500 hover:text-red-700 text-lg ml-2"
-                              title="Supprimer"
-                            >
-                              🗑️
-                            </button>
+                            
+                            {/* Verrouillage : Modification et Suppression impossibles si l'article est commandé */}
+                            {!item.commande_passee ? (
+                              <>
+                                <button 
+                                  onClick={() => editerFourniture(item)}
+                                  className="text-blue-500 hover:text-blue-700 text-lg ml-2"
+                                  title="Modifier cet article"
+                                >
+                                  ✏️
+                                </button>
+                                <button 
+                                  onClick={() => supprimerFourniture(item.id)}
+                                  className="text-red-500 hover:text-red-700 text-lg ml-2"
+                                  title="Supprimer cet article"
+                                >
+                                  🗑️
+                                </button>
+                              </>
+                            ) : (
+                              <span className="ml-2 text-gray-400 text-lg cursor-not-allowed" title="Article verrouillé car déjà commandé">🔒</span>
+                            )}
                           </div>
                         </div>
                         <div className="text-sm text-gray-600 mt-1 flex flex-wrap gap-x-4 gap-y-1">
@@ -329,7 +398,6 @@ export default function PageChantier() {
                           {item.lien && <a href={item.lien} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline">🔗 Voir le produit</a>}
                         </div>
                         
-                        {/* NOUVEAU : Affichage de la question et de la réponse */}
                         {item.question_artisan && (
                           <div className="mt-3 bg-blue-50 p-3 rounded border border-blue-200 text-sm">
                             <p className="font-semibold text-blue-900">Vous avez demandé : <span className="font-normal italic">{item.question_artisan}</span></p>
