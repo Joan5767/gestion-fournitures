@@ -9,8 +9,10 @@ export default function TableauDeBord() {
   const [nomClient, setNomClient] = useState("");
   const [adresseClient, setAdresseClient] = useState("");
   
-  // Nouvel état pour la barre de recherche
+  // États pour les filtres
   const [recherche, setRecherche] = useState("");
+  const [dateDebut, setDateDebut] = useState("");
+  const [dateFin, setDateFin] = useState("");
 
   useEffect(() => {
     fetchChantiers();
@@ -56,24 +58,37 @@ export default function TableauDeBord() {
     }
   }
 
-  // Fonction utilitaire pour formater la date au format français
-  const formaterDateRecherche = (dateString: string) => {
+  const formaterDateAffichage = (dateString: string) => {
     if (!dateString) return "";
     return new Date(dateString).toLocaleDateString("fr-FR");
   };
 
-  // Filtrage des chantiers en temps réel
+  // Filtrage combiné : Texte + Période de date
   const chantiersFiltres = chantiers.filter((chantier) => {
+    // 1. Filtre par texte (Nom / Adresse)
     const texteRecherche = recherche.toLowerCase();
     const nom = (chantier.nom_client || "").toLowerCase();
     const adresse = (chantier.adresse_client || "").toLowerCase();
-    const dateCreation = formaterDateRecherche(chantier.created_at);
+    const correspondTexte = nom.includes(texteRecherche) || adresse.includes(texteRecherche);
 
-    return (
-      nom.includes(texteRecherche) ||
-      adresse.includes(texteRecherche) ||
-      dateCreation.includes(texteRecherche)
-    );
+    // 2. Filtre par date
+    let correspondDate = true;
+    if (dateDebut || dateFin) {
+      const dateChantier = new Date(chantier.created_at).getTime();
+      
+      if (dateDebut) {
+        const debut = new Date(dateDebut).getTime();
+        if (dateChantier < debut) correspondDate = false;
+      }
+      
+      if (dateFin) {
+        // On ajoute 24h (86400000 ms) pour inclure la journée entière de la date de fin
+        const fin = new Date(dateFin).getTime() + 86400000;
+        if (dateChantier > fin) correspondDate = false;
+      }
+    }
+
+    return correspondTexte && correspondDate;
   });
 
   return (
@@ -104,19 +119,57 @@ export default function TableauDeBord() {
         </form>
       </div>
 
-      {/* BARRE DE RECHERCHE */}
-      <div className="mb-6">
-        <input 
-          type="text" 
-          placeholder="🔍 Rechercher un chantier par nom, adresse ou date (ex: 25/08/2026)..." 
-          className="w-full border p-3 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          value={recherche}
-          onChange={(e) => setRecherche(e.target.value)}
-        />
+      {/* ZONE DE RECHERCHE AVANCÉE */}
+      <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 mb-6 flex flex-col md:flex-row gap-4 items-center">
+        
+        {/* Recherche texte */}
+        <div className="flex-1 w-full">
+          <label className="block text-xs text-blue-800 font-bold mb-1 uppercase">Recherche libre</label>
+          <input 
+            type="text" 
+            placeholder="🔍 Nom ou adresse du client..." 
+            className="w-full border p-2 rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={recherche}
+            onChange={(e) => setRecherche(e.target.value)}
+          />
+        </div>
+
+        {/* Recherche par calendrier (Période) */}
+        <div className="flex gap-2 w-full md:w-auto items-end">
+          <div>
+            <label className="block text-xs text-blue-800 font-bold mb-1 uppercase">Du (inclus)</label>
+            <input 
+              type="date" 
+              className="border p-2 rounded shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={dateDebut}
+              onChange={(e) => setDateDebut(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-blue-800 font-bold mb-1 uppercase">Au (inclus)</label>
+            <input 
+              type="date" 
+              className="border p-2 rounded shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={dateFin}
+              onChange={(e) => setDateFin(e.target.value)}
+            />
+          </div>
+          
+          {/* Bouton pour réinitialiser les dates */}
+          {(dateDebut || dateFin) && (
+            <button 
+              onClick={() => { setDateDebut(""); setDateFin(""); }}
+              className="text-red-500 hover:text-red-700 font-bold text-sm px-2 pb-2"
+              title="Effacer les dates"
+            >
+              ✖
+            </button>
+          )}
+        </div>
       </div>
 
+      {/* LISTE DES CHANTIERS */}
       <div className="grid gap-4">
-        {/* On utilise chantiersFiltres au lieu de chantiers pour l'affichage */}
         {chantiersFiltres.map((chantier) => (
           <div key={chantier.id} className="border p-4 rounded-lg flex justify-between items-center shadow-sm bg-white">
             <div>
@@ -135,7 +188,7 @@ export default function TableauDeBord() {
                   {chantier.statut.toUpperCase()}
                 </span>
                 <span className="text-xs text-gray-400">
-                  Créé le {formaterDateRecherche(chantier.created_at)}
+                  Créé le {formaterDateAffichage(chantier.created_at)}
                 </span>
               </div>
             </div>
@@ -155,9 +208,8 @@ export default function TableauDeBord() {
           </div>
         ))}
         
-        {/* Messages si aucun résultat */}
         {chantiers.length > 0 && chantiersFiltres.length === 0 && (
-          <p className="text-gray-500 italic">Aucun chantier ne correspond à votre recherche.</p>
+          <p className="text-gray-500 italic">Aucun chantier ne correspond à vos filtres.</p>
         )}
         {chantiers.length === 0 && (
           <p className="text-gray-500 italic">Aucun chantier pour le moment.</p>
