@@ -14,21 +14,22 @@ export default function PageValidationClient() {
   const [loading, setLoading] = useState(true);
   const [validationEnCours, setValidationEnCours] = useState(false);
   
-  // NOUVEAU : État pour stocker les réponses du client au fur et à mesure
   const [reponses, setReponses] = useState<{ [key: string]: string }>({});
+  // NOUVEAU : État pour le commentaire global du client
+  const [commentaireClient, setCommentaireClient] = useState("");
 
   useEffect(() => {
     async function fetchDonnees() {
       const { data: chantierData } = await supabase.from("chantiers").select("*").eq("token_validation", token).single();
       if (chantierData) {
         setChantier(chantierData);
+        setCommentaireClient(chantierData.commentaire_client || ""); // Charge le commentaire existant
 
         const { data: fournituresData } = await supabase.from("fournitures").select("*").eq("chantier_id", chantierData.id).order("created_at", { ascending: true });
         if (fournituresData) {
           setFournitures(fournituresData);
           setArticlesRefuses(fournituresData.filter(f => f.refuse).map(f => f.id));
           
-          // NOUVEAU : On pré-remplit le formulaire avec les réponses existantes (s'il y en a)
           const reponsesInitiales: { [key: string]: string } = {};
           fournituresData.forEach(f => {
             if (f.reponse_client) reponsesInitiales[f.id] = f.reponse_client;
@@ -41,12 +42,12 @@ export default function PageValidationClient() {
     fetchDonnees();
   }, [token]);
 
-  const basculerRefus = (id: string, estValide: boolean) => {
-    if (estValide || chantier.statut === "valide" || chantier.statut === "commande_passee") return;
+  const basculerRefus = (id: string, estValide: boolean, estCommande: boolean) => {
+    // SECURITE : Impossible de refuser si c'est validé, si le chantier est clos, ou si c'est déjà commandé
+    if (estValide || chantier.statut === "valide" || chantier.statut === "commande_passee" || estCommande) return;
     setArticlesRefuses((prev) => prev.includes(id) ? prev.filter((itemId) => itemId !== id) : [...prev, id]);
   };
 
-  // NOUVEAU : Fonction pour mettre à jour la réponse d'un article spécifique
   const handleReponseChange = (id: string, texte: string) => {
     setReponses(prev => ({ ...prev, [id]: texte }));
   };
@@ -55,16 +56,15 @@ export default function PageValidationClient() {
     setValidationEnCours(true);
     
     try {
-      // 1. Verrouiller les nouveaux articles et enregistrer les réponses
       for (const item of fournitures) {
         if (!item.est_valide) {
           const estRefuse = articlesRefuses.includes(item.id);
-          const reponseClient = reponses[item.id] || null; // On récupère la réponse tapée
+          const reponseClient = reponses[item.id] || null;
           
           const { error: errFourniture } = await supabase.from("fournitures").update({ 
             refuse: estRefuse,
             est_valide: true,
-            reponse_client: reponseClient // NOUVEAU : On sauvegarde la réponse dans la base
+            reponse_client: reponseClient 
           }).eq("id", item.id);
 
           if (errFourniture) {
@@ -75,10 +75,11 @@ export default function PageValidationClient() {
         }
       }
       
-      // 2. Valider le chantier
+      // NOUVEAU : On enregistre le commentaire client en même temps que la validation
       const { error: errChantier } = await supabase.from("chantiers").update({ 
         statut: "valide", 
-        date_validation: new Date().toISOString() 
+        date_validation: new Date().toISOString(),
+        commentaire_client: commentaireClient
       }).eq("id", chantier.id);
       
       if (errChantier) {
@@ -87,7 +88,6 @@ export default function PageValidationClient() {
         return;
       }
 
-      // 3. Envoyer l'e-mail instantané
       await fetch("/api/notifier-validation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -124,6 +124,7 @@ export default function PageValidationClient() {
           {fournitures.map((item) => {
             const estRefuse = articlesRefuses.includes(item.id);
             const estVerrouille = item.est_valide;
+            const estCommande = item.commande_passee; // On vérifie si vous avez commandé
 
             return (
               <li key={item.id} className={`flex flex-col p-4 rounded border transition-colors ${estRefuse ? "bg-red-50 border-red-200" : estVerrouille ? "bg-green-50 border-green-100" : "bg-white"}`}>
@@ -144,21 +145,27 @@ export default function PageValidationClient() {
                   </div>
                   
                   <div className="flex flex-col items-center justify-center border-l pl-4 min-w-[80px]">
-                    {estVerrouille ? (
+                    {/* Logique d'affichage des boutons d'action du client */}
+                    {estCommande ? (
                       <div className="text-center">
-                        <span className="text-2xl">🔒</span>
-                        <span className="block text-xs font-bold text-green-700 mt-1">Déjà validé</span>
+                        <span className="text-2xl" title="Article en cours de commande">🔒</span>
+                        <span className="block text-xs font-bold text-blue-700 mt-1">Commandé</span>
+                      </div>
+                    ) : estVerrouille ? (
+                      <div className="text-center">
+                        <span className="text-2xl">✅</span>
+                        <span className="block text-xs font-bold text-green-700 mt-1">Validé</span>
                       </div>
                     ) : !toutEstValide ? (
-                      <button onClick={() => basculerRefus(item.id, estVerrouille)} className={`w-10 h-10 flex items-center justify-center rounded-full border text-xl ${estRefuse ? "bg-red-100 border-red-300" : "bg-gray-100 border-gray-300"}`}>
+                      <button onClick={() => basculerRefus(item.id, estVerrouille, estCommande)} className={`w-10 h-10 flex items-center justify-center rounded-full border text-xl ${estRefuse ? "bg-red-100 border-red-300" : "bg-gray-100 border-gray-300 hover:bg-gray-200"}`}>
                         {estRefuse ? "↩️" : "❌"}
                       </button>
                     ) : null}
-                    {estRefuse && <span className="text-xs font-bold bg-red-200 text-red-800 px-2 py-1 rounded text-center mt-2">REFUSÉ</span>}
+                    
+                    {estRefuse && !estCommande && <span className="text-xs font-bold bg-red-200 text-red-800 px-2 py-1 rounded text-center mt-2">REFUSÉ</span>}
                   </div>
                 </div>
 
-                {/* NOUVEAU : Encart Question / Réponse */}
                 {item.question_artisan && (
                   <div className={`mt-4 bg-blue-50 p-3 rounded-lg border border-blue-200 ${estRefuse ? "opacity-50" : ""}`}>
                     <p className="text-sm font-semibold text-blue-900 mb-2">
@@ -170,7 +177,7 @@ export default function PageValidationClient() {
                       rows={2}
                       value={reponses[item.id] || ""}
                       onChange={(e) => handleReponseChange(item.id, e.target.value)}
-                      disabled={estVerrouille || toutEstValide || estRefuse}
+                      disabled={estVerrouille || toutEstValide || estRefuse || estCommande}
                     />
                   </div>
                 )}
@@ -180,13 +187,28 @@ export default function PageValidationClient() {
         </ul>
       </div>
 
+      {/* NOUVEAU : Zone de commentaire global */}
+      <div className="bg-gray-50 p-4 rounded-md mb-6 border">
+        <h2 className="font-semibold text-gray-800 mb-2">📝 Remarque générale (Optionnel) :</h2>
+        <textarea
+          className="w-full border border-gray-300 p-3 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-600"
+          rows={4}
+          placeholder="Une information complémentaire à transmettre à votre artisan ? Tapez-la ici..."
+          value={commentaireClient}
+          onChange={(e) => setCommentaireClient(e.target.value)}
+          disabled={toutEstValide} // On bloque la modification si c'est déjà validé
+        ></textarea>
+      </div>
+
       {toutEstValide ? (
-        <div className="bg-green-100 text-green-800 p-4 rounded-md text-center font-bold">✅ Liste complète validée</div>
+        <div className="bg-green-100 text-green-800 p-4 rounded-md text-center font-bold shadow-inner">
+          ✅ Vous avez validé toutes les fournitures. Merci !
+        </div>
       ) : (
         <button 
           onClick={validerFournitures} 
           disabled={validationEnCours}
-          className={`w-full text-white font-bold py-4 rounded-md shadow-md ${validationEnCours ? "bg-blue-400" : "bg-blue-600 hover:bg-blue-700"}`}
+          className={`w-full text-white font-bold py-4 rounded-md shadow-md transition-colors ${validationEnCours ? "bg-blue-400" : "bg-blue-600 hover:bg-blue-700"}`}
         >
           {validationEnCours ? "Validation en cours..." : "Je valide mes choix et mes réponses"}
         </button>
