@@ -129,7 +129,6 @@ export default function PageChantier() {
     if (!erreurRequete) {
       if (chantier.statut === "valide" || chantier.statut === "commande_passee") {
         await supabase.from("chantiers").update({ statut: "brouillon" }).eq("id", id);
-        // MODIFICATION ICI POUR LE MESSAGE D'ALERTE
         alert(editingId ? "Article modifié ! Le chantier repasse en 'En cours de modification'." : "Article ajouté ! Le chantier repasse en 'En cours de modification'.");
       } else if (editingId) {
         alert("Modifications enregistrées !");
@@ -262,7 +261,6 @@ export default function PageChantier() {
       <div className="flex justify-between items-start mb-8 pb-4 border-b">
         <div>
           <h1 className="text-3xl font-bold">{chantier.nom_client}</h1>
-          {/* MODIFICATION ICI POUR L'AFFICHAGE DU STATUT */}
           <p className="text-gray-600 mt-1">STATUT : <strong className="uppercase">{chantier.statut === 'brouillon' ? 'EN COURS DE MODIFICATION' : chantier.statut}</strong></p>
         </div>
         <div className="text-right flex flex-col items-end gap-2">
@@ -408,7 +406,8 @@ export default function PageChantier() {
                       </div>
                     </div>
                     
-                    {item.est_valide && !item.refuse && (
+                    {/* MODIFICATION ICI : Le bouton s'affiche tant que l'article n'est pas refusé */}
+                    {!item.refuse && (
                       <div className="mt-4 pt-3 border-t flex justify-between items-center">
                         <span className="text-sm font-medium text-gray-600">État de la commande :</span>
                         <button
