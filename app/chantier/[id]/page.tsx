@@ -14,7 +14,6 @@ export default function PageChantier() {
   const [chantier, setChantier] = useState<any>(null);
   const [fournitures, setFournitures] = useState<any[]>([]);
   
-  // NOUVEAU : État pour savoir si on modifie un article existant
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const [designation, setDesignation] = useState("");
@@ -62,7 +61,6 @@ export default function PageChantier() {
     }
   };
 
-  // NOUVEAU : Fonction pour charger les données d'un article dans le formulaire
   const editerFourniture = (item: any) => {
     setEditingId(item.id);
     setDesignation(item.designation || "");
@@ -75,7 +73,6 @@ export default function PageChantier() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // NOUVEAU : Fonction pour réinitialiser le formulaire
   const annulerEdition = () => {
     setEditingId(null);
     setDesignation("");
@@ -103,7 +100,6 @@ export default function PageChantier() {
       }
     }
 
-    // Préparation des données (on réinitialise la validation en cas de modification)
     const payload: any = { 
       chantier_id: id, 
       designation, 
@@ -112,7 +108,7 @@ export default function PageChantier() {
       reference, 
       lien, 
       question_artisan: questionArtisan,
-      est_valide: false, // Re-verrouillage client nécessaire
+      est_valide: false,
       refuse: false
     };
 
@@ -122,7 +118,6 @@ export default function PageChantier() {
 
     let erreurRequete = null;
 
-    // Si on est en mode édition, on met à jour, sinon on insère
     if (editingId) {
       const { error } = await supabase.from("fournitures").update(payload).eq("id", editingId);
       erreurRequete = error;
@@ -132,10 +127,10 @@ export default function PageChantier() {
     }
 
     if (!erreurRequete) {
-      // Repasser le chantier en brouillon si ce n'est pas le cas
       if (chantier.statut === "valide" || chantier.statut === "commande_passee") {
         await supabase.from("chantiers").update({ statut: "brouillon" }).eq("id", id);
-        alert(editingId ? "Article modifié ! Le chantier repasse en 'Brouillon'." : "Article ajouté ! Le chantier repasse en 'Brouillon'.");
+        // MODIFICATION ICI POUR LE MESSAGE D'ALERTE
+        alert(editingId ? "Article modifié ! Le chantier repasse en 'En cours de modification'." : "Article ajouté ! Le chantier repasse en 'En cours de modification'.");
       } else if (editingId) {
         alert("Modifications enregistrées !");
       }
@@ -267,7 +262,8 @@ export default function PageChantier() {
       <div className="flex justify-between items-start mb-8 pb-4 border-b">
         <div>
           <h1 className="text-3xl font-bold">{chantier.nom_client}</h1>
-          <p className="text-gray-600 mt-1">STATUT : <strong className="uppercase">{chantier.statut}</strong></p>
+          {/* MODIFICATION ICI POUR L'AFFICHAGE DU STATUT */}
+          <p className="text-gray-600 mt-1">STATUT : <strong className="uppercase">{chantier.statut === 'brouillon' ? 'EN COURS DE MODIFICATION' : chantier.statut}</strong></p>
         </div>
         <div className="text-right flex flex-col items-end gap-2">
            <div className="flex gap-2">
@@ -369,7 +365,6 @@ export default function PageChantier() {
                           <div className="flex items-center gap-2">
                             <span className="font-black bg-gray-100 px-2 py-1 rounded text-sm">{item.quantite}</span>
                             
-                            {/* Verrouillage : Modification et Suppression impossibles si l'article est commandé */}
                             {!item.commande_passee ? (
                               <>
                                 <button 

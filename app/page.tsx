@@ -194,7 +194,7 @@ export default function TableauDeBord() {
                   chantier.statut === 'valide' ? 'bg-green-200 text-green-800' : 
                   chantier.statut === 'commande_passee' ? 'bg-blue-200 text-blue-800' : 'bg-yellow-200 text-yellow-800'
                 }`}>
-                  {chantier.statut.toUpperCase()}
+                  {chantier.statut === 'brouillon' ? 'EN COURS DE MODIFICATION' : chantier.statut.toUpperCase()}
                 </span>
                 <span className="text-xs text-gray-400">
                   Créé le {formaterDateAffichage(chantier.created_at)}
