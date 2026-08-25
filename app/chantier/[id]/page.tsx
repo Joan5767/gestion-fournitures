@@ -19,6 +19,8 @@ export default function PageChantier() {
   const [fournisseur, setFournisseur] = useState("");
   const [reference, setReference] = useState("");
   const [lien, setLien] = useState("");
+  // NOUVEAU : État pour la question de l'artisan
+  const [questionArtisan, setQuestionArtisan] = useState(""); 
   const [fichierPhoto, setFichierPhoto] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -75,7 +77,14 @@ export default function PageChantier() {
     }
 
     const { error } = await supabase.from("fournitures").insert([{ 
-      chantier_id: id, designation, quantite, fournisseur, reference, lien, photo_url: photoUrlFinal 
+      chantier_id: id, 
+      designation, 
+      quantite, 
+      fournisseur, 
+      reference, 
+      lien, 
+      photo_url: photoUrlFinal,
+      question_artisan: questionArtisan // NOUVEAU : Enregistrement de la question
     }]);
 
     if (!error) {
@@ -84,7 +93,7 @@ export default function PageChantier() {
         alert("Article ajouté ! Le chantier repasse en 'Brouillon' pour que le client valide cet ajout.");
       }
       
-      setDesignation(""); setQuantite(""); setFournisseur(""); setReference(""); setLien(""); setFichierPhoto(null);
+      setDesignation(""); setQuantite(""); setFournisseur(""); setReference(""); setLien(""); setQuestionArtisan(""); setFichierPhoto(null);
       fetchChantierEtFournitures();
     } else {
       alert("Erreur lors de l'ajout.");
@@ -130,7 +139,8 @@ export default function PageChantier() {
   };
 
   const exporterVersExcel = () => {
-    const enTetes = ["Fournisseur", "Article", "Reference", "Quantite", "Lien", "Photo", "Statut", "Date de validation", "Commandé chez le fournisseur"];
+    // NOUVEAU : Ajout des colonnes Question et Réponse à l'export
+    const enTetes = ["Fournisseur", "Article", "Reference", "Quantite", "Question", "Réponse Client", "Lien", "Photo", "Statut", "Date de validation", "Commandé"];
     
     const dateVal = (chantier.statut === "valide" || chantier.statut === "commande_passee") && chantier.date_validation 
       ? formaterDate(chantier.date_validation) 
@@ -141,6 +151,8 @@ export default function PageChantier() {
       `"${f.designation.replace(/"/g, '""')}"`,
       `"${(f.reference || "").replace(/"/g, '""')}"`,
       `"${f.quantite.replace(/"/g, '""')}"`,
+      `"${(f.question_artisan || "").replace(/"/g, '""')}"`,
+      `"${(f.reponse_client || "").replace(/"/g, '""')}"`,
       `"${(f.lien || "").replace(/"/g, '""')}"`,
       `"${(f.photo_url || "").replace(/"/g, '""')}"`,
       f.refuse ? "Refusé" : "Validé",
@@ -177,14 +189,16 @@ export default function PageChantier() {
     doc.text(`Date de validation officielle : ${dateValidation}`, 14, 36);
     doc.text("Ce document atteste l'approbation des fournitures listées ci-dessous.", 14, 42);
 
-    const colonnes = ["Désignation", "Quantité", "Fournisseur", "Référence"];
+    // NOUVEAU : Ajout de la colonne réponse au PDF
+    const colonnes = ["Désignation", "Qté", "Fournisseur", "Référence", "Réponse Client"];
     const lignes = fournitures
       .filter(item => !item.refuse) 
       .map(item => [
         item.designation,
         item.quantite,
         item.fournisseur || "-",
-        item.reference || "-"
+        item.reference || "-",
+        item.reponse_client || "-"
       ]);
 
     autoTable(doc, {
@@ -235,6 +249,18 @@ export default function PageChantier() {
             <input type="text" placeholder="Référence" className="border p-3 rounded" value={reference} onChange={(e) => setReference(e.target.value)} />
             <input type="url" placeholder="Lien URL de l'article" className="border p-3 rounded col-span-2" value={lien} onChange={(e) => setLien(e.target.value)} />
             
+            {/* NOUVEAU : Champ pour poser une question au client */}
+            <div className="col-span-2 border-t pt-4 mt-2">
+              <label className="block text-sm font-bold text-blue-800 mb-1">💬 Poser une question au client (Optionnel)</label>
+              <input 
+                type="text" 
+                placeholder="Ex: Quel emplacement pour ce carrelage ?" 
+                className="w-full border border-blue-200 bg-blue-50 p-3 rounded" 
+                value={questionArtisan} 
+                onChange={(e) => setQuestionArtisan(e.target.value)} 
+              />
+            </div>
+
             <div className="col-span-2">
               <label className="block text-sm text-gray-600 mb-1">Photo (optionnelle)</label>
               <div
@@ -302,6 +328,19 @@ export default function PageChantier() {
                           {item.reference && <span>🏷️ Ref: {item.reference}</span>}
                           {item.lien && <a href={item.lien} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline">🔗 Voir le produit</a>}
                         </div>
+                        
+                        {/* NOUVEAU : Affichage de la question et de la réponse */}
+                        {item.question_artisan && (
+                          <div className="mt-3 bg-blue-50 p-3 rounded border border-blue-200 text-sm">
+                            <p className="font-semibold text-blue-900">Vous avez demandé : <span className="font-normal italic">{item.question_artisan}</span></p>
+                            {item.reponse_client ? (
+                              <p className="mt-1 text-green-700 font-bold">Réponse : {item.reponse_client}</p>
+                            ) : (
+                              <p className="mt-1 text-gray-500 italic">⏳ En attente de la réponse du client...</p>
+                            )}
+                          </div>
+                        )}
+
                         {item.refuse && <span className="text-xs font-bold text-red-600 block mt-2">❌ REFUSÉ</span>}
                       </div>
                     </div>

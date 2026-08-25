@@ -13,6 +13,9 @@ export default function PageValidationClient() {
   const [articlesRefuses, setArticlesRefuses] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [validationEnCours, setValidationEnCours] = useState(false);
+  
+  // NOUVEAU : État pour stocker les réponses du client au fur et à mesure
+  const [reponses, setReponses] = useState<{ [key: string]: string }>({});
 
   useEffect(() => {
     async function fetchDonnees() {
@@ -24,6 +27,13 @@ export default function PageValidationClient() {
         if (fournituresData) {
           setFournitures(fournituresData);
           setArticlesRefuses(fournituresData.filter(f => f.refuse).map(f => f.id));
+          
+          // NOUVEAU : On pré-remplit le formulaire avec les réponses existantes (s'il y en a)
+          const reponsesInitiales: { [key: string]: string } = {};
+          fournituresData.forEach(f => {
+            if (f.reponse_client) reponsesInitiales[f.id] = f.reponse_client;
+          });
+          setReponses(reponsesInitiales);
         }
       }
       setLoading(false);
@@ -36,17 +46,25 @@ export default function PageValidationClient() {
     setArticlesRefuses((prev) => prev.includes(id) ? prev.filter((itemId) => itemId !== id) : [...prev, id]);
   };
 
+  // NOUVEAU : Fonction pour mettre à jour la réponse d'un article spécifique
+  const handleReponseChange = (id: string, texte: string) => {
+    setReponses(prev => ({ ...prev, [id]: texte }));
+  };
+
   const validerFournitures = async () => {
     setValidationEnCours(true);
     
     try {
-      // 1. Verrouiller les nouveaux articles
+      // 1. Verrouiller les nouveaux articles et enregistrer les réponses
       for (const item of fournitures) {
         if (!item.est_valide) {
           const estRefuse = articlesRefuses.includes(item.id);
+          const reponseClient = reponses[item.id] || null; // On récupère la réponse tapée
+          
           const { error: errFourniture } = await supabase.from("fournitures").update({ 
             refuse: estRefuse,
-            est_valide: true 
+            est_valide: true,
+            reponse_client: reponseClient // NOUVEAU : On sauvegarde la réponse dans la base
           }).eq("id", item.id);
 
           if (errFourniture) {
@@ -69,17 +87,17 @@ export default function PageValidationClient() {
         return;
       }
 
-      // 3. Envoyer l'e-mail instantané personnalisé à l'artisan via Resend
+      // 3. Envoyer l'e-mail instantané
       await fetch("/api/notifier-validation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           nomClient: chantier.nom_client,
-          nomChantier: chantier.nom_chantier || chantier.nom_client // Ajustez si votre colonne s'appelle autrement
+          nomChantier: chantier.nom_chantier || chantier.nom_client 
         }),
       });
 
-      alert("Vos choix ont été enregistrés avec succès !");
+      alert("Vos choix et vos réponses ont été enregistrés avec succès !");
       window.location.reload();
       
     } catch (e: any) {
@@ -100,7 +118,7 @@ export default function PageValidationClient() {
 
       <div className="bg-gray-50 p-4 rounded-md mb-6 border">
         <h2 className="font-semibold mb-2 border-b pb-2">Matériel prévu :</h2>
-        {!toutEstValide && <p className="text-sm text-blue-600 mb-4 font-medium">De nouveaux articles ont été ajoutés. Veuillez les vérifier et valider ci-dessous.</p>}
+        {!toutEstValide && <p className="text-sm text-blue-600 mb-4 font-medium">De nouveaux articles ont été ajoutés. Veuillez vérifier, répondre aux questions éventuelles et valider ci-dessous.</p>}
         
         <ul className="space-y-4">
           {fournitures.map((item) => {
@@ -108,34 +126,54 @@ export default function PageValidationClient() {
             const estVerrouille = item.est_valide;
 
             return (
-              <li key={item.id} className={`flex gap-4 p-4 rounded border transition-colors ${estRefuse ? "bg-red-50 border-red-200" : estVerrouille ? "bg-green-50 border-green-100" : "bg-white"}`}>
-                {item.photo_url && (
-                  <img src={item.photo_url} alt="Photo produit" className={`w-24 h-24 object-cover rounded border flex-shrink-0 ${estRefuse ? "opacity-50 grayscale" : ""}`} />
-                )}
+              <li key={item.id} className={`flex flex-col p-4 rounded border transition-colors ${estRefuse ? "bg-red-50 border-red-200" : estVerrouille ? "bg-green-50 border-green-100" : "bg-white"}`}>
                 
-                <div className={`flex-1 flex flex-col justify-center ${estRefuse ? "line-through opacity-70" : ""}`}>
-                  <span className="font-bold text-lg">{item.designation}</span>
-                  <div className="text-sm text-gray-600 mt-1 grid grid-cols-1 gap-1">
-                    <span className="font-medium text-black">Quantité : {item.quantite}</span>
-                    {item.fournisseur && <span>Fournisseur : {item.fournisseur}</span>}
-                    {item.reference && <span>Réf : {item.reference}</span>}
-                    {item.lien && <a href={item.lien} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">Voir la fiche produit</a>}
+                <div className="flex gap-4">
+                  {item.photo_url && (
+                    <img src={item.photo_url} alt="Photo produit" className={`w-24 h-24 object-cover rounded border flex-shrink-0 ${estRefuse ? "opacity-50 grayscale" : ""}`} />
+                  )}
+                  
+                  <div className={`flex-1 flex flex-col justify-center ${estRefuse ? "line-through opacity-70" : ""}`}>
+                    <span className="font-bold text-lg">{item.designation}</span>
+                    <div className="text-sm text-gray-600 mt-1 grid grid-cols-1 gap-1">
+                      <span className="font-medium text-black">Quantité : {item.quantite}</span>
+                      {item.fournisseur && <span>Fournisseur : {item.fournisseur}</span>}
+                      {item.reference && <span>Réf : {item.reference}</span>}
+                      {item.lien && <a href={item.lien} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">Voir la fiche produit</a>}
+                    </div>
+                  </div>
+                  
+                  <div className="flex flex-col items-center justify-center border-l pl-4 min-w-[80px]">
+                    {estVerrouille ? (
+                      <div className="text-center">
+                        <span className="text-2xl">🔒</span>
+                        <span className="block text-xs font-bold text-green-700 mt-1">Déjà validé</span>
+                      </div>
+                    ) : !toutEstValide ? (
+                      <button onClick={() => basculerRefus(item.id, estVerrouille)} className={`w-10 h-10 flex items-center justify-center rounded-full border text-xl ${estRefuse ? "bg-red-100 border-red-300" : "bg-gray-100 border-gray-300"}`}>
+                        {estRefuse ? "↩️" : "❌"}
+                      </button>
+                    ) : null}
+                    {estRefuse && <span className="text-xs font-bold bg-red-200 text-red-800 px-2 py-1 rounded text-center mt-2">REFUSÉ</span>}
                   </div>
                 </div>
-                
-                <div className="flex flex-col items-center justify-center border-l pl-4 min-w-[80px]">
-                  {estVerrouille ? (
-                    <div className="text-center">
-                      <span className="text-2xl">🔒</span>
-                      <span className="block text-xs font-bold text-green-700 mt-1">Déjà validé</span>
-                    </div>
-                  ) : !toutEstValide ? (
-                    <button onClick={() => basculerRefus(item.id, estVerrouille)} className={`w-10 h-10 flex items-center justify-center rounded-full border text-xl ${estRefuse ? "bg-red-100 border-red-300" : "bg-gray-100 border-gray-300"}`}>
-                      {estRefuse ? "↩️" : "❌"}
-                    </button>
-                  ) : null}
-                  {estRefuse && <span className="text-xs font-bold bg-red-200 text-red-800 px-2 py-1 rounded text-center mt-2">REFUSÉ</span>}
-                </div>
+
+                {/* NOUVEAU : Encart Question / Réponse */}
+                {item.question_artisan && (
+                  <div className={`mt-4 bg-blue-50 p-3 rounded-lg border border-blue-200 ${estRefuse ? "opacity-50" : ""}`}>
+                    <p className="text-sm font-semibold text-blue-900 mb-2">
+                      💬 Question de votre artisan : <span className="font-normal italic">{item.question_artisan}</span>
+                    </p>
+                    <textarea 
+                      className="w-full border border-blue-200 p-2 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
+                      placeholder={estVerrouille ? "Vous avez déjà validé cette réponse." : "Tapez votre réponse ici..."}
+                      rows={2}
+                      value={reponses[item.id] || ""}
+                      onChange={(e) => handleReponseChange(item.id, e.target.value)}
+                      disabled={estVerrouille || toutEstValide || estRefuse}
+                    />
+                  </div>
+                )}
               </li>
             );
           })}
@@ -150,7 +188,7 @@ export default function PageValidationClient() {
           disabled={validationEnCours}
           className={`w-full text-white font-bold py-4 rounded-md shadow-md ${validationEnCours ? "bg-blue-400" : "bg-blue-600 hover:bg-blue-700"}`}
         >
-          {validationEnCours ? "Validation en cours..." : "Je valide mes choix et les ajouts"}
+          {validationEnCours ? "Validation en cours..." : "Je valide mes choix et mes réponses"}
         </button>
       )}
     </div>
