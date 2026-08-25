@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 export default function PageChantier() {
   const params = useParams();
@@ -90,6 +92,18 @@ export default function PageChantier() {
     setIsUploading(false);
   }
 
+  async function supprimerFourniture(articleId: string) {
+    if (!confirm("Voulez-vous vraiment supprimer cet article ?")) return;
+
+    const { error } = await supabase.from("fournitures").delete().eq("id", articleId);
+
+    if (error) {
+      alert("Erreur lors de la suppression : " + error.message);
+    } else {
+      setFournitures((prev) => prev.filter((item) => item.id !== articleId));
+    }
+  }
+
   async function marquerArticleCommande(idFourniture: string, statutActuel: boolean) {
     const { error } = await supabase
       .from("fournitures")
@@ -142,6 +156,48 @@ export default function PageChantier() {
     link.click();
   };
 
+  const telechargerPreuvePDF = () => {
+    if (chantier.statut !== "valide" && chantier.statut !== "commande_passee") {
+      alert("Le chantier n'a pas encore été validé par le client.");
+      return;
+    }
+
+    const doc = new jsPDF();
+    
+    doc.setFontSize(18);
+    doc.text("Certificat de Validation des Fournitures", 14, 20);
+    
+    doc.setFontSize(11);
+    doc.text(`Chantier / Client : ${chantier.nom_client}`, 14, 30);
+    
+    const dateValidation = chantier.date_validation 
+      ? formaterDate(chantier.date_validation) 
+      : "Date inconnue";
+      
+    doc.text(`Date de validation officielle : ${dateValidation}`, 14, 36);
+    doc.text("Ce document atteste l'approbation des fournitures listées ci-dessous.", 14, 42);
+
+    const colonnes = ["Désignation", "Quantité", "Fournisseur", "Référence"];
+    const lignes = fournitures
+      .filter(item => !item.refuse) 
+      .map(item => [
+        item.designation,
+        item.quantite,
+        item.fournisseur || "-",
+        item.reference || "-"
+      ]);
+
+    autoTable(doc, {
+      head: [colonnes],
+      body: lignes,
+      startY: 50,
+      theme: "grid",
+      headStyles: { fillColor: [41, 128, 185] }
+    });
+
+    doc.save(`Preuve_Validation_${chantier.nom_client.replace(/\s+/g, '_')}.pdf`);
+  };
+
   if (!chantier) return <div className="p-8 font-bold">Chargement...</div>;
   const lienValidation = typeof window !== "undefined" ? `${window.location.origin}/validation/${chantier.token_validation}` : "";
 
@@ -155,7 +211,12 @@ export default function PageChantier() {
           <p className="text-gray-600 mt-1">STATUT : <strong className="uppercase">{chantier.statut}</strong></p>
         </div>
         <div className="text-right flex flex-col items-end gap-2">
-           <button onClick={exporterVersExcel} className="bg-green-600 text-white px-4 py-2 rounded font-bold hover:bg-green-700">📊 Exporter Excel</button>
+           <div className="flex gap-2">
+             <button onClick={exporterVersExcel} className="bg-green-600 text-white px-4 py-2 rounded font-bold hover:bg-green-700">📊 Exporter Excel</button>
+             {(chantier.statut === "valide" || chantier.statut === "commande_passee") && (
+               <button onClick={telechargerPreuvePDF} className="bg-blue-600 text-white px-4 py-2 rounded font-bold hover:bg-blue-700">📄 Preuve PDF</button>
+             )}
+           </div>
            {(chantier.statut === "valide" || chantier.statut === "commande_passee") && chantier.date_validation && (
             <div className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded border mt-2">
               🔒 Validé le : <strong>{formaterDate(chantier.date_validation)}</strong>
@@ -174,7 +235,6 @@ export default function PageChantier() {
             <input type="text" placeholder="Référence" className="border p-3 rounded" value={reference} onChange={(e) => setReference(e.target.value)} />
             <input type="url" placeholder="Lien URL de l'article" className="border p-3 rounded col-span-2" value={lien} onChange={(e) => setLien(e.target.value)} />
             
-            {/* Zone de Drag & Drop pour la photo */}
             <div className="col-span-2">
               <label className="block text-sm text-gray-600 mb-1">Photo (optionnelle)</label>
               <div
@@ -226,7 +286,16 @@ export default function PageChantier() {
                             {item.designation} 
                             {item.est_valide && <span className="ml-2 text-xs bg-green-100 text-green-700 px-2 py-1 rounded">✅ Validé</span>}
                           </span>
-                          <span className="font-black bg-gray-100 px-2 py-1 rounded text-sm">{item.quantite}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-black bg-gray-100 px-2 py-1 rounded text-sm">{item.quantite}</span>
+                            <button 
+                              onClick={() => supprimerFourniture(item.id)}
+                              className="text-red-500 hover:text-red-700 text-lg ml-2"
+                              title="Supprimer"
+                            >
+                              🗑️
+                            </button>
+                          </div>
                         </div>
                         <div className="text-sm text-gray-600 mt-1 flex flex-wrap gap-x-4 gap-y-1">
                           {item.fournisseur && <span>🛒 {item.fournisseur}</span>}
