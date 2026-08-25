@@ -9,7 +9,8 @@ export default function TableauDeBord() {
   const [nomClient, setNomClient] = useState("");
   const [adresseClient, setAdresseClient] = useState("");
   
-  // États pour les filtres
+  // États pour les filtres et l'affichage du menu
+  const [afficherRecherche, setAfficherRecherche] = useState(false);
   const [recherche, setRecherche] = useState("");
   const [dateDebut, setDateDebut] = useState("");
   const [dateFin, setDateFin] = useState("");
@@ -65,13 +66,11 @@ export default function TableauDeBord() {
 
   // Filtrage combiné : Texte + Période de date
   const chantiersFiltres = chantiers.filter((chantier) => {
-    // 1. Filtre par texte (Nom / Adresse)
     const texteRecherche = recherche.toLowerCase();
     const nom = (chantier.nom_client || "").toLowerCase();
     const adresse = (chantier.adresse_client || "").toLowerCase();
     const correspondTexte = nom.includes(texteRecherche) || adresse.includes(texteRecherche);
 
-    // 2. Filtre par date
     let correspondDate = true;
     if (dateDebut || dateFin) {
       const dateChantier = new Date(chantier.created_at).getTime();
@@ -82,7 +81,6 @@ export default function TableauDeBord() {
       }
       
       if (dateFin) {
-        // On ajoute 24h (86400000 ms) pour inclure la journée entière de la date de fin
         const fin = new Date(dateFin).getTime() + 86400000;
         if (dateChantier > fin) correspondDate = false;
       }
@@ -119,54 +117,65 @@ export default function TableauDeBord() {
         </form>
       </div>
 
-      {/* ZONE DE RECHERCHE AVANCÉE */}
-      <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 mb-6 flex flex-col md:flex-row gap-4 items-center">
-        
-        {/* Recherche texte */}
-        <div className="flex-1 w-full">
-          <label className="block text-xs text-blue-800 font-bold mb-1 uppercase">Recherche libre</label>
-          <input 
-            type="text" 
-            placeholder="🔍 Nom ou adresse du client..." 
-            className="w-full border p-2 rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            value={recherche}
-            onChange={(e) => setRecherche(e.target.value)}
-          />
-        </div>
-
-        {/* Recherche par calendrier (Période) */}
-        <div className="flex gap-2 w-full md:w-auto items-end">
-          <div>
-            <label className="block text-xs text-blue-800 font-bold mb-1 uppercase">Du (inclus)</label>
-            <input 
-              type="date" 
-              className="border p-2 rounded shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              value={dateDebut}
-              onChange={(e) => setDateDebut(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-blue-800 font-bold mb-1 uppercase">Au (inclus)</label>
-            <input 
-              type="date" 
-              className="border p-2 rounded shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              value={dateFin}
-              onChange={(e) => setDateFin(e.target.value)}
-            />
-          </div>
-          
-          {/* Bouton pour réinitialiser les dates */}
-          {(dateDebut || dateFin) && (
-            <button 
-              onClick={() => { setDateDebut(""); setDateFin(""); }}
-              className="text-red-500 hover:text-red-700 font-bold text-sm px-2 pb-2"
-              title="Effacer les dates"
-            >
-              ✖
-            </button>
-          )}
-        </div>
+      {/* EN-TÊTE LISTE + BOUTON RECHERCHE */}
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-xl font-semibold">Liste des chantiers ({chantiersFiltres.length})</h2>
+        <button 
+          onClick={() => setAfficherRecherche(!afficherRecherche)}
+          className={`px-4 py-2 rounded font-bold text-sm transition-colors ${
+            afficherRecherche ? "bg-gray-300 text-gray-800 hover:bg-gray-400" : "bg-blue-100 text-blue-800 hover:bg-blue-200"
+          }`}
+        >
+          {afficherRecherche ? "Fermer la recherche ✖" : "Rechercher 🔍"}
+        </button>
       </div>
+
+      {/* ZONE DE RECHERCHE AVANCÉE (Masquée par défaut) */}
+      {afficherRecherche && (
+        <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 mb-6 flex flex-col md:flex-row gap-4 items-center animate-fade-in">
+          <div className="flex-1 w-full">
+            <label className="block text-xs text-blue-800 font-bold mb-1 uppercase">Recherche libre</label>
+            <input 
+              type="text" 
+              placeholder="Nom ou adresse du client..." 
+              className="w-full border p-2 rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={recherche}
+              onChange={(e) => setRecherche(e.target.value)}
+            />
+          </div>
+
+          <div className="flex gap-2 w-full md:w-auto items-end">
+            <div>
+              <label className="block text-xs text-blue-800 font-bold mb-1 uppercase">Du (inclus)</label>
+              <input 
+                type="date" 
+                className="border p-2 rounded shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={dateDebut}
+                onChange={(e) => setDateDebut(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-blue-800 font-bold mb-1 uppercase">Au (inclus)</label>
+              <input 
+                type="date" 
+                className="border p-2 rounded shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={dateFin}
+                onChange={(e) => setDateFin(e.target.value)}
+              />
+            </div>
+            
+            {(dateDebut || dateFin || recherche) && (
+              <button 
+                onClick={() => { setDateDebut(""); setDateFin(""); setRecherche(""); }}
+                className="text-red-500 hover:text-red-700 font-bold text-sm px-2 pb-2"
+                title="Effacer tous les filtres"
+              >
+                ✖
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* LISTE DES CHANTIERS */}
       <div className="grid gap-4">
