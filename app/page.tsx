@@ -8,6 +8,9 @@ export default function TableauDeBord() {
   const [chantiers, setChantiers] = useState<any[]>([]);
   const [nomClient, setNomClient] = useState("");
   const [adresseClient, setAdresseClient] = useState("");
+  
+  // Nouvel état pour la barre de recherche
+  const [recherche, setRecherche] = useState("");
 
   useEffect(() => {
     fetchChantiers();
@@ -40,22 +43,38 @@ export default function TableauDeBord() {
   }
 
   async function supprimerChantier(id: string) {
-    // Sécurité : On demande confirmation avant de tout effacer
     const confirmation = window.confirm("Êtes-vous sûr de vouloir supprimer définitivement ce chantier ? Cette action est irréversible.");
     if (!confirmation) return;
 
-    // 1. On supprime d'abord les fournitures associées pour ne pas créer de conflit
     await supabase.from("fournitures").delete().eq("chantier_id", id);
-    
-    // 2. On supprime ensuite le chantier lui-même
     const { error } = await supabase.from("chantiers").delete().eq("id", id);
     
     if (error) {
       alert("Erreur lors de la suppression : " + error.message);
     } else {
-      fetchChantiers(); // On rafraîchit la liste pour faire disparaître la ligne
+      fetchChantiers(); 
     }
   }
+
+  // Fonction utilitaire pour formater la date au format français
+  const formaterDateRecherche = (dateString: string) => {
+    if (!dateString) return "";
+    return new Date(dateString).toLocaleDateString("fr-FR");
+  };
+
+  // Filtrage des chantiers en temps réel
+  const chantiersFiltres = chantiers.filter((chantier) => {
+    const texteRecherche = recherche.toLowerCase();
+    const nom = (chantier.nom_client || "").toLowerCase();
+    const adresse = (chantier.adresse_client || "").toLowerCase();
+    const dateCreation = formaterDateRecherche(chantier.created_at);
+
+    return (
+      nom.includes(texteRecherche) ||
+      adresse.includes(texteRecherche) ||
+      dateCreation.includes(texteRecherche)
+    );
+  });
 
   return (
     <div className="p-8 max-w-5xl mx-auto">
@@ -85,8 +104,20 @@ export default function TableauDeBord() {
         </form>
       </div>
 
+      {/* BARRE DE RECHERCHE */}
+      <div className="mb-6">
+        <input 
+          type="text" 
+          placeholder="🔍 Rechercher un chantier par nom, adresse ou date (ex: 25/08/2026)..." 
+          className="w-full border p-3 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          value={recherche}
+          onChange={(e) => setRecherche(e.target.value)}
+        />
+      </div>
+
       <div className="grid gap-4">
-        {chantiers.map((chantier) => (
+        {/* On utilise chantiersFiltres au lieu de chantiers pour l'affichage */}
+        {chantiersFiltres.map((chantier) => (
           <div key={chantier.id} className="border p-4 rounded-lg flex justify-between items-center shadow-sm bg-white">
             <div>
               <h3 className="font-bold text-lg">{chantier.nom_client}</h3>
@@ -95,13 +126,18 @@ export default function TableauDeBord() {
               )}
               {!chantier.adresse_client && <div className="mb-2 mt-1"></div>}
               
-              <span className={`text-xs font-bold px-2 py-1 rounded ${
-                chantier.statut === 'brouillon' ? 'bg-gray-200 text-gray-800' : 
-                chantier.statut === 'valide' ? 'bg-green-200 text-green-800' : 
-                chantier.statut === 'commande_passee' ? 'bg-blue-200 text-blue-800' : 'bg-yellow-200 text-yellow-800'
-              }`}>
-                {chantier.statut.toUpperCase()}
-              </span>
+              <div className="flex gap-2 items-center">
+                <span className={`text-xs font-bold px-2 py-1 rounded ${
+                  chantier.statut === 'brouillon' ? 'bg-gray-200 text-gray-800' : 
+                  chantier.statut === 'valide' ? 'bg-green-200 text-green-800' : 
+                  chantier.statut === 'commande_passee' ? 'bg-blue-200 text-blue-800' : 'bg-yellow-200 text-yellow-800'
+                }`}>
+                  {chantier.statut.toUpperCase()}
+                </span>
+                <span className="text-xs text-gray-400">
+                  Créé le {formaterDateRecherche(chantier.created_at)}
+                </span>
+              </div>
             </div>
             
             <div className="flex items-center gap-3">
@@ -118,6 +154,11 @@ export default function TableauDeBord() {
             </div>
           </div>
         ))}
+        
+        {/* Messages si aucun résultat */}
+        {chantiers.length > 0 && chantiersFiltres.length === 0 && (
+          <p className="text-gray-500 italic">Aucun chantier ne correspond à votre recherche.</p>
+        )}
         {chantiers.length === 0 && (
           <p className="text-gray-500 italic">Aucun chantier pour le moment.</p>
         )}
