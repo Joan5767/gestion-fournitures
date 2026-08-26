@@ -11,6 +11,9 @@ export default function PageChantier() {
   const params = useParams();
   const id = params.id as string;
 
+  // NOUVEAU : État pour la sécurité de la page
+  const [estAuthentifie, setEstAuthentifie] = useState(false);
+
   const [chantier, setChantier] = useState<any>(null);
   const [fournitures, setFournitures] = useState<any[]>([]);
   
@@ -26,9 +29,20 @@ export default function PageChantier() {
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
+  // NOUVEAU : Vérification de la connexion au chargement
   useEffect(() => {
-    if (id) fetchChantierEtFournitures();
-  }, [id]);
+    supabase.auth.getSession().then(({ data }) => {
+      if (!data.session) {
+        window.location.href = "/login"; // Redirige vers la connexion si pas de session
+      } else {
+        setEstAuthentifie(true); // Autorise l'accès
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (id && estAuthentifie) fetchChantierEtFournitures();
+  }, [id, estAuthentifie]);
 
   async function fetchChantierEtFournitures() {
     const { data: chantierData } = await supabase.from("chantiers").select("*").eq("id", id).single();
@@ -251,6 +265,11 @@ export default function PageChantier() {
     doc.save(`Preuve_Validation_${chantier.nom_client.replace(/\s+/g, '_')}.pdf`);
   };
 
+  // NOUVEAU : Blocage de l'écran tant que l'artisan n'est pas authentifié
+  if (!estAuthentifie) {
+    return <div className="p-20 text-center font-bold text-xl text-gray-600">Vérification de sécurité en cours...</div>;
+  }
+
   if (!chantier) return <div className="p-8 font-bold">Chargement...</div>;
   const lienValidation = typeof window !== "undefined" ? `${window.location.origin}/validation/${chantier.token_validation}` : "";
 
@@ -406,7 +425,6 @@ export default function PageChantier() {
                       </div>
                     </div>
                     
-                    {/* MODIFICATION ICI : Le bouton s'affiche tant que l'article n'est pas refusé */}
                     {!item.refuse && (
                       <div className="mt-4 pt-3 border-t flex justify-between items-center">
                         <span className="text-sm font-medium text-gray-600">État de la commande :</span>

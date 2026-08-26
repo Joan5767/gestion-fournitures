@@ -5,6 +5,9 @@ import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 
 export default function TableauDeBord() {
+  // NOUVEAU : État pour vérifier si vous êtes connecté
+  const [estAuthentifie, setEstAuthentifie] = useState(false);
+
   const [chantiers, setChantiers] = useState<any[]>([]);
   const [nomClient, setNomClient] = useState("");
   const [adresseClient, setAdresseClient] = useState("");
@@ -15,9 +18,22 @@ export default function TableauDeBord() {
   const [dateDebut, setDateDebut] = useState("");
   const [dateFin, setDateFin] = useState("");
 
+  // NOUVEAU : Vérification de la connexion au chargement
   useEffect(() => {
-    fetchChantiers();
+    supabase.auth.getSession().then(({ data }) => {
+      if (!data.session) {
+        window.location.href = "/login"; // Redirige vers la page de connexion
+      } else {
+        setEstAuthentifie(true); // Autorise l'affichage de la page
+      }
+    });
   }, []);
+
+  useEffect(() => {
+    if (estAuthentifie) {
+      fetchChantiers();
+    }
+  }, [estAuthentifie]);
 
   async function fetchChantiers() {
     const { data, error } = await supabase
@@ -64,7 +80,6 @@ export default function TableauDeBord() {
     return new Date(dateString).toLocaleDateString("fr-FR");
   };
 
-  // Filtrage combiné : Texte + Période de date
   const chantiersFiltres = chantiers.filter((chantier) => {
     const texteRecherche = recherche.toLowerCase();
     const nom = (chantier.nom_client || "").toLowerCase();
@@ -89,9 +104,23 @@ export default function TableauDeBord() {
     return correspondTexte && correspondDate;
   });
 
+  // NOUVEAU : Écran d'attente pendant la vérification du mot de passe
+  if (!estAuthentifie) {
+    return <div className="p-20 text-center font-bold text-xl text-gray-600">Vérification de sécurité en cours...</div>;
+  }
+
   return (
     <div className="p-8 max-w-5xl mx-auto">
-      <h1 className="text-3xl font-bold mb-8">Mes Chantiers</h1>
+      {/* NOUVEAU : En-tête avec bouton de déconnexion */}
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-3xl font-bold">Mes Chantiers</h1>
+        <button 
+          onClick={() => supabase.auth.signOut().then(() => window.location.reload())}
+          className="text-red-600 hover:text-red-800 font-bold text-sm bg-red-50 px-4 py-2 rounded border border-red-200"
+        >
+          Déconnexion
+        </button>
+      </div>
       
       <div className="bg-gray-100 p-6 rounded-lg mb-8 border border-gray-200">
         <h2 className="text-xl font-semibold mb-4">Créer un nouveau chantier</h2>
@@ -117,7 +146,6 @@ export default function TableauDeBord() {
         </form>
       </div>
 
-      {/* EN-TÊTE LISTE + BOUTON RECHERCHE */}
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-semibold">Liste des chantiers ({chantiersFiltres.length})</h2>
         <button 
@@ -130,7 +158,6 @@ export default function TableauDeBord() {
         </button>
       </div>
 
-      {/* ZONE DE RECHERCHE AVANCÉE (Masquée par défaut) */}
       {afficherRecherche && (
         <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 mb-6 flex flex-col md:flex-row gap-4 items-center animate-fade-in">
           <div className="flex-1 w-full">
@@ -177,7 +204,6 @@ export default function TableauDeBord() {
         </div>
       )}
 
-      {/* LISTE DES CHANTIERS */}
       <div className="grid gap-4">
         {chantiersFiltres.map((chantier) => (
           <div key={chantier.id} className="border p-4 rounded-lg flex justify-between items-center shadow-sm bg-white">
