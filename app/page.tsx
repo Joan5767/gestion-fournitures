@@ -5,26 +5,23 @@ import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 
 export default function TableauDeBord() {
-  // NOUVEAU : État pour vérifier si vous êtes connecté
   const [estAuthentifie, setEstAuthentifie] = useState(false);
 
   const [chantiers, setChantiers] = useState<any[]>([]);
   const [nomClient, setNomClient] = useState("");
   const [adresseClient, setAdresseClient] = useState("");
   
-  // États pour les filtres et l'affichage du menu
   const [afficherRecherche, setAfficherRecherche] = useState(false);
   const [recherche, setRecherche] = useState("");
   const [dateDebut, setDateDebut] = useState("");
   const [dateFin, setDateFin] = useState("");
 
-  // NOUVEAU : Vérification de la connexion au chargement
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       if (!data.session) {
-        window.location.href = "/login"; // Redirige vers la page de connexion
+        window.location.href = "/login";
       } else {
-        setEstAuthentifie(true); // Autorise l'affichage de la page
+        setEstAuthentifie(true);
       }
     });
   }, []);
@@ -75,6 +72,18 @@ export default function TableauDeBord() {
     }
   }
 
+  // NOUVEAU : Fonction pour sauvegarder le mémo automatiquement
+  async function mettreAJourMemo(id: string, nouveauMemo: string) {
+    const { error } = await supabase
+      .from("chantiers")
+      .update({ memo_artisan: nouveauMemo })
+      .eq("id", id);
+      
+    if (error) {
+      console.error("Erreur sauvegarde mémo:", error);
+    }
+  }
+
   const formaterDateAffichage = (dateString: string) => {
     if (!dateString) return "";
     return new Date(dateString).toLocaleDateString("fr-FR");
@@ -104,14 +113,12 @@ export default function TableauDeBord() {
     return correspondTexte && correspondDate;
   });
 
-  // NOUVEAU : Écran d'attente pendant la vérification du mot de passe
   if (!estAuthentifie) {
     return <div className="p-20 text-center font-bold text-xl text-gray-600">Vérification de sécurité en cours...</div>;
   }
 
   return (
     <div className="p-8 max-w-5xl mx-auto">
-      {/* NOUVEAU : En-tête avec bouton de déconnexion */}
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold">Mes Chantiers</h1>
         <button 
@@ -206,40 +213,58 @@ export default function TableauDeBord() {
 
       <div className="grid gap-4">
         {chantiersFiltres.map((chantier) => (
-          <div key={chantier.id} className="border p-4 rounded-lg flex justify-between items-center shadow-sm bg-white">
-            <div>
-              <h3 className="font-bold text-lg">{chantier.nom_client}</h3>
-              {chantier.adresse_client && (
-                <p className="text-sm text-gray-500 mb-2 mt-1">📍 {chantier.adresse_client}</p>
-              )}
-              {!chantier.adresse_client && <div className="mb-2 mt-1"></div>}
+          <div key={chantier.id} className="border p-4 rounded-lg flex flex-col shadow-sm bg-white">
+            
+            {/* Ligne du haut : Infos chantier et boutons */}
+            <div className="flex justify-between items-start">
+              <div>
+                <h3 className="font-bold text-lg">{chantier.nom_client}</h3>
+                {chantier.adresse_client && (
+                  <p className="text-sm text-gray-500 mb-2 mt-1">📍 {chantier.adresse_client}</p>
+                )}
+                {!chantier.adresse_client && <div className="mb-2 mt-1"></div>}
+                
+                <div className="flex gap-2 items-center">
+                  <span className={`text-xs font-bold px-2 py-1 rounded ${
+                    chantier.statut === 'brouillon' ? 'bg-gray-200 text-gray-800' : 
+                    chantier.statut === 'valide' ? 'bg-green-200 text-green-800' : 
+                    chantier.statut === 'commande_passee' ? 'bg-blue-200 text-blue-800' : 'bg-yellow-200 text-yellow-800'
+                  }`}>
+                    {chantier.statut === 'brouillon' ? 'EN COURS DE MODIFICATION' : chantier.statut.toUpperCase()}
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    Créé le {formaterDateAffichage(chantier.created_at)}
+                  </span>
+                </div>
+              </div>
               
-              <div className="flex gap-2 items-center">
-                <span className={`text-xs font-bold px-2 py-1 rounded ${
-                  chantier.statut === 'brouillon' ? 'bg-gray-200 text-gray-800' : 
-                  chantier.statut === 'valide' ? 'bg-green-200 text-green-800' : 
-                  chantier.statut === 'commande_passee' ? 'bg-blue-200 text-blue-800' : 'bg-yellow-200 text-yellow-800'
-                }`}>
-                  {chantier.statut === 'brouillon' ? 'EN COURS DE MODIFICATION' : chantier.statut.toUpperCase()}
-                </span>
-                <span className="text-xs text-gray-400">
-                  Créé le {formaterDateAffichage(chantier.created_at)}
-                </span>
+              <div className="flex items-center gap-3">
+                <Link href={`/chantier/${chantier.id}`} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 font-medium text-sm">
+                  Gérer les fournitures
+                </Link>
+                <button 
+                  onClick={() => supprimerChantier(chantier.id)}
+                  className="text-red-500 hover:text-white border border-red-500 hover:bg-red-600 px-3 py-2 rounded font-bold transition-colors"
+                  title="Supprimer ce chantier"
+                >
+                  🗑️
+                </button>
               </div>
             </div>
-            
-            <div className="flex items-center gap-3">
-              <Link href={`/chantier/${chantier.id}`} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 font-medium text-sm">
-                Gérer les fournitures
-              </Link>
-              <button 
-                onClick={() => supprimerChantier(chantier.id)}
-                className="text-red-500 hover:text-white border border-red-500 hover:bg-red-600 px-3 py-2 rounded font-bold transition-colors"
-                title="Supprimer ce chantier"
-              >
-                🗑️
-              </button>
+
+            {/* NOUVEAU : Bloc Mémo en dessous */}
+            <div className="mt-4 bg-yellow-50 p-3 rounded border border-yellow-200">
+              <label className="block text-xs font-bold text-yellow-800 mb-1 uppercase">📝 Mémo interne</label>
+              <input 
+                type="text" 
+                placeholder="Ex: En attente d'une validation pour la couleur du plan de travail..."
+                value={chantier.memo_artisan || ""}
+                onChange={(e) => setChantiers(chantiers.map(c => c.id === chantier.id ? { ...c, memo_artisan: e.target.value } : c))}
+                onBlur={(e) => mettreAJourMemo(chantier.id, e.target.value)}
+                className="w-full bg-transparent border-b border-yellow-300 focus:border-yellow-600 focus:outline-none text-sm text-gray-800 p-1 placeholder-yellow-600/50"
+              />
             </div>
+
           </div>
         ))}
         
