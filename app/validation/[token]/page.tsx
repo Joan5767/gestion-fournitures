@@ -164,7 +164,7 @@ export default function PageValidationClient() {
                           </>
                         ) : (
                           <>
-                            <span className="text-xs font-bold bg-green-100 text-green-800 px-2 py-1 rounded text-center border border-green-200">✅ Prévu</span>
+                            <span className="text-xs font-bold bg-green-100 text-green-800 px-2 py-1 rounded text-center border border-green-200">✅ Prévu dans le devis</span>
                             <button onClick={() => basculerRefus(item.id, estVerrouille, estCommande)} className="text-xs bg-white border border-red-300 text-red-600 px-2 py-2 rounded font-bold hover:bg-red-50 transition-colors">
                               ❌ Refuser
                             </button>
