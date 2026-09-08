@@ -115,7 +115,7 @@ export default function PageValidationClient() {
 
       <div className="bg-gray-50 p-4 rounded-md mb-6 border">
         <h2 className="font-semibold mb-2 border-b pb-2">Matériel prévu :</h2>
-        {!toutEstValide && <p className="text-sm text-blue-600 mb-4 font-medium">Veuillez vérifier les articles ci-dessous. Ils sont tous inclus par défaut. Si vous ne souhaitez pas un article, cliquez sur "Refuser".</p>}
+        {!toutEstValide && <p className="text-sm text-blue-600 mb-4 font-medium">Veuillez vérifier les articles ci-dessous. Ils sont tous inclus par défaut. Si vous ne souhaitez pas un article, cliquez sur "Refuser". Une fois les choix confirmés, cliquez sur "je valide mes choix". Sans validation, aucune commande ne pourra être passée.</p>}
         
         <ul className="space-y-4">
           {fournitures.map((item) => {
