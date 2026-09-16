@@ -11,7 +11,6 @@ export default function PageChantier() {
   const params = useParams();
   const id = params.id as string;
 
-  // NOUVEAU : État pour la sécurité de la page
   const [estAuthentifie, setEstAuthentifie] = useState(false);
 
   const [chantier, setChantier] = useState<any>(null);
@@ -29,13 +28,12 @@ export default function PageChantier() {
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
-  // NOUVEAU : Vérification de la connexion au chargement
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       if (!data.session) {
-        window.location.href = "/login"; // Redirige vers la connexion si pas de session
+        window.location.href = "/login";
       } else {
-        setEstAuthentifie(true); // Autorise l'accès
+        setEstAuthentifie(true);
       }
     });
   }, []);
@@ -265,7 +263,6 @@ export default function PageChantier() {
     doc.save(`Preuve_Validation_${chantier.nom_client.replace(/\s+/g, '_')}.pdf`);
   };
 
-  // NOUVEAU : Blocage de l'écran tant que l'artisan n'est pas authentifié
   if (!estAuthentifie) {
     return <div className="p-20 text-center font-bold text-xl text-gray-600">Vérification de sécurité en cours...</div>;
   }
@@ -289,9 +286,21 @@ export default function PageChantier() {
                <button onClick={telechargerPreuvePDF} className="bg-blue-600 text-white px-4 py-2 rounded font-bold hover:bg-blue-700">📄 Preuve PDF</button>
              )}
            </div>
-           {(chantier.statut === "valide" || chantier.statut === "commande_passee") && chantier.date_validation && (
-            <div className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded border mt-2">
-              🔒 Validé le : <strong>{formaterDate(chantier.date_validation)}</strong>
+           
+           {/* NOUVEAU : Affichage de l'historique complet des validations */}
+           {(chantier.statut === "valide" || chantier.statut === "commande_passee") && (chantier.historique_validations?.length > 0 || chantier.date_validation) && (
+            <div className="flex flex-col gap-1 mt-2 items-end">
+              {chantier.historique_validations && chantier.historique_validations.length > 0 ? (
+                chantier.historique_validations.map((dateIso: string, index: number) => (
+                  <div key={index} className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded border">
+                    {index === 0 ? "🔒 Validé le :" : "📝 Modification validée le :"} <strong>{formaterDate(dateIso)}</strong>
+                  </div>
+                ))
+              ) : chantier.date_validation ? (
+                <div className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded border">
+                  🔒 Validé le : <strong>{formaterDate(chantier.date_validation)}</strong>
+                </div>
+              ) : null}
             </div>
           )}
         </div>

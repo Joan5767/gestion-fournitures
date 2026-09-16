@@ -73,9 +73,15 @@ export default function PageValidationClient() {
         }
       }
       
+      // NOUVEAU : On gère l'historique des validations
+      const currentDate = new Date().toISOString();
+      const historiqueActuel = chantier.historique_validations || [];
+      const nouvelHistorique = [...historiqueActuel, currentDate];
+
       const { error: errChantier } = await supabase.from("chantiers").update({ 
         statut: "valide", 
-        date_validation: new Date().toISOString(),
+        date_validation: currentDate, // On garde la date principale à jour
+        historique_validations: nouvelHistorique, // On enregistre toute la liste
         commentaire_client: commentaireClient
       }).eq("id", chantier.id);
       
@@ -115,7 +121,7 @@ export default function PageValidationClient() {
 
       <div className="bg-gray-50 p-4 rounded-md mb-6 border">
         <h2 className="font-semibold mb-2 border-b pb-2">Matériel prévu :</h2>
-        {!toutEstValide && <p className="text-sm text-blue-600 mb-4 font-medium">Veuillez vérifier les articles ci-dessous. Ils sont tous inclus par défaut. Si vous ne souhaitez pas un article, cliquez sur "Refuser". Une fois les choix confirmés, cliquez sur "je valide mes choix". Sans validation, aucune commande ne pourra être passée.</p>}
+        {!toutEstValide && <p className="text-sm text-blue-600 mb-4 font-medium">Veuillez vérifier les articles ci-dessous. Ils sont tous inclus par défaut. Si vous ne souhaitez pas un article, cliquez sur "Refuser".</p>}
         
         <ul className="space-y-4">
           {fournitures.map((item) => {
@@ -141,7 +147,6 @@ export default function PageValidationClient() {
                     </div>
                   </div>
                   
-                  {/* MODIFICATION ICI : Remaniement de la zone d'action */}
                   <div className="flex flex-col items-center justify-center border-l pl-4 min-w-[120px]">
                     {estCommande ? (
                       <div className="text-center">
@@ -164,7 +169,7 @@ export default function PageValidationClient() {
                           </>
                         ) : (
                           <>
-                            <span className="text-xs font-bold bg-green-100 text-green-800 px-2 py-1 rounded text-center border border-green-200">✅ Prévu dans le devis</span>
+                            <span className="text-xs font-bold bg-green-100 text-green-800 px-2 py-1 rounded text-center border border-green-200">✅ Prévu</span>
                             <button onClick={() => basculerRefus(item.id, estVerrouille, estCommande)} className="text-xs bg-white border border-red-300 text-red-600 px-2 py-2 rounded font-bold hover:bg-red-50 transition-colors">
                               ❌ Refuser
                             </button>
