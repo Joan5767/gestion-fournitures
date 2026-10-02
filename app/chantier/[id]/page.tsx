@@ -166,20 +166,32 @@ export default function PageChantier() {
     }
   }
 
+  // MODIFICATION ICI : Ajout de la confirmation et de la date
   async function marquerArticleCommande(idFourniture: string, statutActuel: boolean) {
+    // Demande de confirmation si l'article est déjà commandé
+    if (statutActuel) {
+      const confirmation = window.confirm("Voulez-vous vraiment annuler la commande et changer le statut en 'à commander' ?");
+      if (!confirmation) return; // Si l'utilisateur clique sur "Non", on annule l'action
+    }
+
+    // On génère la date actuelle si on passe en commandé, sinon on remet à null
+    const nouvelleDate = !statutActuel ? new Date().toISOString() : null;
+
     const { error } = await supabase
       .from("fournitures")
-      .update({ commande_passee: !statutActuel })
+      .update({ 
+        commande_passee: !statutActuel,
+        date_commande: nouvelleDate
+      })
       .eq("id", idFourniture);
     
     if (!error) {
       fetchChantierEtFournitures();
     } else {
-      alert("Erreur lors de la mise à jour de l'article.");
+      alert("Erreur lors de la mise à jour de l'article : " + error.message);
     }
   }
 
-  // NOUVEAU : On enregistre la date dans l'historique lors de la clôture
   async function marquerCommandePassee() {
     const currentDate = new Date().toISOString();
     const historiqueActuel = chantier.historique_commandes || [];
@@ -317,7 +329,6 @@ export default function PageChantier() {
             </div>
           )}
 
-          {/* NOUVEAU : Affichage de l'historique des passages en commande */}
           {chantier.historique_commandes && chantier.historique_commandes.length > 0 && (
             <div className="flex flex-col gap-1 mt-1 items-end">
               {chantier.historique_commandes.map((dateIso: string, index: number) => (
@@ -460,7 +471,13 @@ export default function PageChantier() {
                     
                     {!item.refuse && (
                       <div className="mt-4 pt-3 border-t flex justify-between items-center">
-                        <span className="text-sm font-medium text-gray-600">État de la commande :</span>
+                        <div>
+                          <span className="text-sm font-medium text-gray-600 block">État de la commande :</span>
+                          {/* MODIFICATION ICI : Affichage de la date sous "État de la commande :" */}
+                          {item.commande_passee && item.date_commande && (
+                            <span className="text-xs text-blue-600 font-bold mt-1 inline-block">Commandé le : {formaterDate(item.date_commande)}</span>
+                          )}
+                        </div>
                         <button
                           onClick={() => marquerArticleCommande(item.id, item.commande_passee)}
                           className={`px-4 py-1.5 text-sm font-bold rounded transition-colors ${
