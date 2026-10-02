@@ -179,9 +179,23 @@ export default function PageChantier() {
     }
   }
 
+  // NOUVEAU : On enregistre la date dans l'historique lors de la clôture
   async function marquerCommandePassee() {
-    const { error } = await supabase.from("chantiers").update({ statut: "commande_passee" }).eq("id", id);
-    if (!error) { fetchChantierEtFournitures(); alert("Dossier clôturé. Le harcèlement par email est arrêté !"); }
+    const currentDate = new Date().toISOString();
+    const historiqueActuel = chantier.historique_commandes || [];
+    const nouvelHistorique = [...historiqueActuel, currentDate];
+
+    const { error } = await supabase.from("chantiers").update({ 
+      statut: "commande_passee",
+      historique_commandes: nouvelHistorique
+    }).eq("id", id);
+    
+    if (!error) { 
+      fetchChantierEtFournitures(); 
+      alert("Dossier clôturé. Le harcèlement par email est arrêté !"); 
+    } else {
+      alert("Erreur lors de la clôture : " + error.message);
+    }
   }
 
   const formaterDate = (dateString: string) => {
@@ -287,7 +301,6 @@ export default function PageChantier() {
              )}
            </div>
            
-           {/* NOUVEAU : Affichage de l'historique complet des validations */}
            {(chantier.statut === "valide" || chantier.statut === "commande_passee") && (chantier.historique_validations?.length > 0 || chantier.date_validation) && (
             <div className="flex flex-col gap-1 mt-2 items-end">
               {chantier.historique_validations && chantier.historique_validations.length > 0 ? (
@@ -301,6 +314,17 @@ export default function PageChantier() {
                   🔒 Validé le : <strong>{formaterDate(chantier.date_validation)}</strong>
                 </div>
               ) : null}
+            </div>
+          )}
+
+          {/* NOUVEAU : Affichage de l'historique des passages en commande */}
+          {chantier.historique_commandes && chantier.historique_commandes.length > 0 && (
+            <div className="flex flex-col gap-1 mt-1 items-end">
+              {chantier.historique_commandes.map((dateIso: string, index: number) => (
+                <div key={`cmd-${index}`} className="text-xs text-blue-700 bg-blue-50 px-2 py-1 rounded border border-blue-200">
+                  📦 Passé en commande le : <strong>{formaterDate(dateIso)}</strong>
+                </div>
+              ))}
             </div>
           )}
         </div>
