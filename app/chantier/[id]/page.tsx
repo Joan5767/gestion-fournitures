@@ -28,11 +28,12 @@ export default function PageChantier() {
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
-  // NOUVEAU : États pour l'action groupée de réception
   const [articlesSelectionnes, setArticlesSelectionnes] = useState<string[]>([]);
   const [dateReceptionBulk, setDateReceptionBulk] = useState("");
   const [lieuReceptionBulk, setLieuReceptionBulk] = useState("");
   const [refCommandeBulk, setRefCommandeBulk] = useState("");
+  // NOUVEAU : État pour la case "À définir"
+  const [receptionADefinirBulk, setReceptionADefinirBulk] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -185,13 +186,16 @@ export default function PageChantier() {
       .update({ 
         commande_passee: !statutActuel,
         date_commande: nouvelleDate,
-        // Si on annule la commande, on nettoie aussi les infos de réception
-        ...(statutActuel && { date_reception: null, lieu_reception: null, reference_commande_fournisseur: null })
+        ...(statutActuel && { 
+          date_reception: null, 
+          lieu_reception: null, 
+          reference_commande_fournisseur: null, 
+          reception_a_definir: false 
+        })
       })
       .eq("id", idFourniture);
     
     if (!error) {
-      // Si on décoche, on le retire aussi de la sélection groupée au cas où
       setArticlesSelectionnes(prev => prev.filter(id => id !== idFourniture));
       fetchChantierEtFournitures();
     } else {
@@ -217,7 +221,6 @@ export default function PageChantier() {
     }
   }
 
-  // NOUVEAU : Fonction de gestion de sélection multiple
   const toggleSelection = (idFourniture: string) => {
     setArticlesSelectionnes(prev => 
       prev.includes(idFourniture) 
@@ -226,7 +229,6 @@ export default function PageChantier() {
     );
   };
 
-  // NOUVEAU : Fonction d'enregistrement groupé des réceptions
   async function enregistrerInfosReception() {
     if (articlesSelectionnes.length === 0) return;
 
@@ -234,6 +236,7 @@ export default function PageChantier() {
       .from("fournitures")
       .update({
         date_reception: dateReceptionBulk || null,
+        reception_a_definir: receptionADefinirBulk,
         lieu_reception: lieuReceptionBulk || null,
         reference_commande_fournisseur: refCommandeBulk || null
       })
@@ -244,6 +247,7 @@ export default function PageChantier() {
       setDateReceptionBulk("");
       setLieuReceptionBulk("");
       setRefCommandeBulk("");
+      setReceptionADefinirBulk(false);
       fetchChantierEtFournitures();
       alert("Informations logistiques enregistrées avec succès !");
     } else {
@@ -264,7 +268,6 @@ export default function PageChantier() {
   };
 
   const exporterVersExcel = () => {
-    // NOUVEAU : Ajout des colonnes logistiques
     const enTetes = [
       "Fournisseur", "Article", "Reference", "Quantite", "Question", "Réponse Client", 
       "Lien", "Photo", "Statut", "Date de validation", "Commandé", 
@@ -287,8 +290,8 @@ export default function PageChantier() {
       f.refuse ? "Refusé" : "Validé",
       `"${dateVal}"`,
       f.commande_passee ? "Oui" : "Non",
-      // Ajout des données dans le mappage Excel
-      `"${f.date_reception ? formaterDateCourte(f.date_reception) : ""}"`,
+      // MODIFICATION ICI : Excel gère le texte "À définir"
+      `"${f.reception_a_definir ? "À définir" : (f.date_reception ? formaterDateCourte(f.date_reception) : "")}"`,
       `"${(f.lieu_reception || "").replace(/"/g, '""')}"`,
       `"${(f.reference_commande_fournisseur || "").replace(/"/g, '""')}"`
     ]);
@@ -462,16 +465,34 @@ export default function PageChantier() {
         </div>
 
         <div>
-          {/* NOUVEAU : Panneau d'édition groupée des réceptions (Visible si des articles sont cochés) */}
           {articlesSelectionnes.length > 0 && (
             <div className="bg-green-100 p-5 rounded-lg border border-green-400 mb-6 shadow-md transition-all">
               <h3 className="font-bold text-green-900 mb-3 flex items-center gap-2">
                 📦 Infos de logistique pour {articlesSelectionnes.length} article(s) sélectionné(s)
               </h3>
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4">
+                {/* MODIFICATION ICI : Intégration de la case "À définir" */}
                 <div>
                   <label className="block text-xs font-bold text-green-800 mb-1">Date de réception</label>
-                  <input type="date" className="w-full border border-green-300 p-2 rounded focus:outline-none focus:ring-2 focus:ring-green-500 text-sm" value={dateReceptionBulk} onChange={e => setDateReceptionBulk(e.target.value)} />
+                  <input 
+                    type="date" 
+                    className="w-full border border-green-300 p-2 rounded focus:outline-none focus:ring-2 focus:ring-green-500 text-sm disabled:opacity-50 disabled:bg-gray-100" 
+                    value={dateReceptionBulk} 
+                    onChange={e => setDateReceptionBulk(e.target.value)} 
+                    disabled={receptionADefinirBulk}
+                  />
+                  <label className="flex items-center gap-2 mt-2 text-sm text-green-900 cursor-pointer font-medium">
+                    <input 
+                      type="checkbox" 
+                      className="accent-green-600 w-4 h-4"
+                      checked={receptionADefinirBulk}
+                      onChange={(e) => {
+                        setReceptionADefinirBulk(e.target.checked);
+                        if (e.target.checked) setDateReceptionBulk(""); // On vide la date si on coche "À définir"
+                      }}
+                    />
+                    À définir
+                  </label>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-green-800 mb-1">Lieu de retrait</label>
@@ -501,7 +522,6 @@ export default function PageChantier() {
                   <li key={item.id} className={`flex flex-col p-4 border rounded shadow-sm ${item.refuse ? "bg-red-50 border-red-200" : "bg-white"} ${editingId === item.id ? "border-yellow-400 ring-2 ring-yellow-200" : ""} ${articlesSelectionnes.includes(item.id) ? "border-green-400 ring-2 ring-green-100" : ""}`}>
                     <div className="flex gap-4 items-start">
                       
-                      {/* NOUVEAU : Case à cocher pour sélection groupée (visible si commandé) */}
                       {item.commande_passee && (
                         <input 
                           type="checkbox" 
@@ -566,12 +586,14 @@ export default function PageChantier() {
 
                         {item.refuse && <span className="text-xs font-bold text-red-600 block mt-2">❌ REFUSÉ</span>}
                         
-                        {/* NOUVEAU : Affichage des informations de réception */}
-                        {(item.date_reception || item.lieu_reception || item.reference_commande_fournisseur) && (
+                        {/* MODIFICATION ICI : Affichage correct du statut "À définir" */}
+                        {(item.date_reception || item.reception_a_definir || item.lieu_reception || item.reference_commande_fournisseur) && (
                           <div className="mt-3 bg-green-50 p-3 rounded border border-green-200 text-sm">
                              <p className="font-semibold text-green-900 mb-1">📦 Détails de logistique :</p>
                              <ul className="text-green-800 space-y-1">
-                               {item.date_reception && <li>📅 Date de réception : <strong>{formaterDateCourte(item.date_reception)}</strong></li>}
+                               {(item.date_reception || item.reception_a_definir) && (
+                                 <li>📅 Date de réception : <strong>{item.reception_a_definir ? "À définir" : formaterDateCourte(item.date_reception)}</strong></li>
+                               )}
                                {item.lieu_reception && <li>📍 Lieu de retrait : <strong>{item.lieu_reception}</strong></li>}
                                {item.reference_commande_fournisseur && <li>🏷️ Réf. Commande : <strong>{item.reference_commande_fournisseur}</strong></li>}
                              </ul>
