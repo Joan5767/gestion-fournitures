@@ -537,7 +537,7 @@ export default function PageChantier() {
                   <input type="text" placeholder="Ex: Leroy Merlin" className="w-full border border-green-300 p-2 rounded focus:outline-none focus:ring-2 focus:ring-green-500 text-sm" value={lieuReceptionBulk} onChange={e => setLieuReceptionBulk(e.target.value)} />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-green-800 mb-1">Réf. Fournisseur</label>
+                  <label className="block text-xs font-bold text-green-800 mb-1">Réf. Commande</label>
                   <input type="text" placeholder="Ex: LR 1561651" className="w-full border border-green-300 p-2 rounded focus:outline-none focus:ring-2 focus:ring-green-500 text-sm" value={refCommandeBulk} onChange={e => setRefCommandeBulk(e.target.value)} />
                 </div>
               </div>
