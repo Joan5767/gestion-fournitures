@@ -6,6 +6,8 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+// NOUVEAU : Import de la bibliothèque pour le vrai format Excel
+import * as ExcelJS from "exceljs";
 
 export default function PageChantier() {
   const params = useParams();
@@ -32,7 +34,6 @@ export default function PageChantier() {
   const [dateReceptionBulk, setDateReceptionBulk] = useState("");
   const [lieuReceptionBulk, setLieuReceptionBulk] = useState("");
   const [refCommandeBulk, setRefCommandeBulk] = useState("");
-  // NOUVEAU : État pour la case "À définir"
   const [receptionADefinirBulk, setReceptionADefinirBulk] = useState(false);
 
   useEffect(() => {
@@ -267,40 +268,78 @@ export default function PageChantier() {
     return new Date(dateString).toLocaleDateString("fr-FR");
   };
 
-  const exporterVersExcel = () => {
-    const enTetes = [
-      "Fournisseur", "Article", "Reference", "Quantite", "Question", "Réponse Client", 
-      "Lien", "Photo", "Statut", "Date de validation", "Commandé", 
-      "Date de réception prévue", "Lieu de retrait", "Réf. Commande Fournisseur"
+  // MODIFICATION ICI : Création d'un VRAI fichier Excel avec style
+  const exporterVersExcel = async () => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Fournitures');
+
+    // 1. Définition des colonnes avec leurs largeurs respectives
+    worksheet.columns = [
+      { header: 'Fournisseur', key: 'fournisseur', width: 20 },
+      { header: 'Article', key: 'article', width: 40 },
+      { header: 'Référence', key: 'reference', width: 20 },
+      { header: 'Quantité', key: 'quantite', width: 15 },
+      { header: 'Question posée', key: 'question', width: 35 },
+      { header: 'Réponse Client', key: 'reponse', width: 35 },
+      { header: 'Lien', key: 'lien', width: 15 },
+      { header: 'Statut Valid.', key: 'statut', width: 15 },
+      { header: 'Date Validation', key: 'date_val', width: 20 },
+      { header: 'Commandé', key: 'commande', width: 15 },
+      { header: 'Date Réception', key: 'date_reception', width: 20 },
+      { header: 'Lieu de Retrait', key: 'lieu', width: 25 },
+      { header: 'Réf. Cde Frs', key: 'ref_fournisseur', width: 20 }
     ];
-    
-    const dateVal = (chantier.statut === "valide" || chantier.statut === "commande_passee") && chantier.date_validation 
+
+    // 2. Formatage de l'en-tête (Gras, fond bleu, texte blanc, quadrillage, alignement)
+    worksheet.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } }; // Bleu
+      cell.border = {
+        top: { style: 'thin' }, left: { style: 'thin' },
+        bottom: { style: 'thin' }, right: { style: 'thin' }
+      };
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    });
+    worksheet.getRow(1).height = 30;
+
+    const dateValGlobal = (chantier.statut === "valide" || chantier.statut === "commande_passee") && chantier.date_validation 
       ? formaterDate(chantier.date_validation) 
       : "En attente";
 
-    const lignes = fournitures.map(f => [
-      `"${(f.fournisseur || "").replace(/"/g, '""')}"`,
-      `"${f.designation.replace(/"/g, '""')}"`,
-      `"${(f.reference || "").replace(/"/g, '""')}"`,
-      `"${f.quantite.replace(/"/g, '""')}"`,
-      `"${(f.question_artisan || "").replace(/"/g, '""')}"`,
-      `"${(f.reponse_client || "").replace(/"/g, '""')}"`,
-      `"${(f.lien || "").replace(/"/g, '""')}"`,
-      `"${(f.photo_url || "").replace(/"/g, '""')}"`,
-      f.refuse ? "Refusé" : "Validé",
-      `"${dateVal}"`,
-      f.commande_passee ? "Oui" : "Non",
-      // MODIFICATION ICI : Excel gère le texte "À définir"
-      `"${f.reception_a_definir ? "À définir" : (f.date_reception ? formaterDateCourte(f.date_reception) : "")}"`,
-      `"${(f.lieu_reception || "").replace(/"/g, '""')}"`,
-      `"${(f.reference_commande_fournisseur || "").replace(/"/g, '""')}"`
-    ]);
-    
-    const csvContent = [enTetes.join(";"), ...lignes.map(l => l.join(";"))].join("\n");
-    const blob = new Blob(["\ufeff" + csvContent], { type: "text/csv;charset=utf-8;" });
+    // 3. Ajout et formatage de chaque ligne
+    fournitures.forEach((f) => {
+      const row = worksheet.addRow({
+        fournisseur: f.fournisseur || "-",
+        article: f.designation,
+        reference: f.reference || "-",
+        quantite: f.quantite,
+        question: f.question_artisan || "-",
+        reponse: f.reponse_client || "-",
+        lien: f.lien || "-",
+        statut: f.refuse ? "Refusé" : "Validé",
+        date_val: dateValGlobal,
+        commande: f.commande_passee ? "Oui" : "Non",
+        date_reception: f.reception_a_definir ? "À définir" : (f.date_reception ? formaterDateCourte(f.date_reception) : "-"),
+        lieu: f.lieu_reception || "-",
+        ref_fournisseur: f.reference_commande_fournisseur || "-"
+      });
+
+      // Quadrillage et retour à la ligne pour chaque cellule
+      row.eachCell((cell) => {
+        cell.alignment = { vertical: 'top', wrapText: true };
+        cell.border = {
+          top: { style: 'thin' }, left: { style: 'thin' },
+          bottom: { style: 'thin' }, right: { style: 'thin' }
+        };
+      });
+    });
+
+    // 4. Création du fichier et téléchargement
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `Fournitures_${chantier.nom_client.replace(/\s+/g, '_')}.csv`;
+    link.download = `Fournitures_${chantier.nom_client.replace(/\s+/g, '_')}.xlsx`;
     link.click();
   };
 
@@ -471,7 +510,6 @@ export default function PageChantier() {
                 📦 Infos de logistique pour {articlesSelectionnes.length} article(s) sélectionné(s)
               </h3>
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4">
-                {/* MODIFICATION ICI : Intégration de la case "À définir" */}
                 <div>
                   <label className="block text-xs font-bold text-green-800 mb-1">Date de réception</label>
                   <input 
@@ -488,7 +526,7 @@ export default function PageChantier() {
                       checked={receptionADefinirBulk}
                       onChange={(e) => {
                         setReceptionADefinirBulk(e.target.checked);
-                        if (e.target.checked) setDateReceptionBulk(""); // On vide la date si on coche "À définir"
+                        if (e.target.checked) setDateReceptionBulk(""); 
                       }}
                     />
                     À définir
@@ -499,7 +537,7 @@ export default function PageChantier() {
                   <input type="text" placeholder="Ex: Leroy Merlin" className="w-full border border-green-300 p-2 rounded focus:outline-none focus:ring-2 focus:ring-green-500 text-sm" value={lieuReceptionBulk} onChange={e => setLieuReceptionBulk(e.target.value)} />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-green-800 mb-1">Réf. Commande</label>
+                  <label className="block text-xs font-bold text-green-800 mb-1">Réf. Fournisseur</label>
                   <input type="text" placeholder="Ex: LR 1561651" className="w-full border border-green-300 p-2 rounded focus:outline-none focus:ring-2 focus:ring-green-500 text-sm" value={refCommandeBulk} onChange={e => setRefCommandeBulk(e.target.value)} />
                 </div>
               </div>
@@ -586,7 +624,6 @@ export default function PageChantier() {
 
                         {item.refuse && <span className="text-xs font-bold text-red-600 block mt-2">❌ REFUSÉ</span>}
                         
-                        {/* MODIFICATION ICI : Affichage correct du statut "À définir" */}
                         {(item.date_reception || item.reception_a_definir || item.lieu_reception || item.reference_commande_fournisseur) && (
                           <div className="mt-3 bg-green-50 p-3 rounded border border-green-200 text-sm">
                              <p className="font-semibold text-green-900 mb-1">📦 Détails de logistique :</p>
