@@ -28,6 +28,12 @@ export default function PageChantier() {
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
+  // NOUVEAU : États pour l'action groupée de réception
+  const [articlesSelectionnes, setArticlesSelectionnes] = useState<string[]>([]);
+  const [dateReceptionBulk, setDateReceptionBulk] = useState("");
+  const [lieuReceptionBulk, setLieuReceptionBulk] = useState("");
+  const [refCommandeBulk, setRefCommandeBulk] = useState("");
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       if (!data.session) {
@@ -166,26 +172,27 @@ export default function PageChantier() {
     }
   }
 
-  // MODIFICATION ICI : Ajout de la confirmation et de la date
   async function marquerArticleCommande(idFourniture: string, statutActuel: boolean) {
-    // Demande de confirmation si l'article est déjà commandé
     if (statutActuel) {
       const confirmation = window.confirm("Voulez-vous vraiment annuler la commande et changer le statut en 'à commander' ?");
-      if (!confirmation) return; // Si l'utilisateur clique sur "Non", on annule l'action
+      if (!confirmation) return; 
     }
 
-    // On génère la date actuelle si on passe en commandé, sinon on remet à null
     const nouvelleDate = !statutActuel ? new Date().toISOString() : null;
 
     const { error } = await supabase
       .from("fournitures")
       .update({ 
         commande_passee: !statutActuel,
-        date_commande: nouvelleDate
+        date_commande: nouvelleDate,
+        // Si on annule la commande, on nettoie aussi les infos de réception
+        ...(statutActuel && { date_reception: null, lieu_reception: null, reference_commande_fournisseur: null })
       })
       .eq("id", idFourniture);
     
     if (!error) {
+      // Si on décoche, on le retire aussi de la sélection groupée au cas où
+      setArticlesSelectionnes(prev => prev.filter(id => id !== idFourniture));
       fetchChantierEtFournitures();
     } else {
       alert("Erreur lors de la mise à jour de l'article : " + error.message);
@@ -210,6 +217,40 @@ export default function PageChantier() {
     }
   }
 
+  // NOUVEAU : Fonction de gestion de sélection multiple
+  const toggleSelection = (idFourniture: string) => {
+    setArticlesSelectionnes(prev => 
+      prev.includes(idFourniture) 
+        ? prev.filter(id => id !== idFourniture) 
+        : [...prev, idFourniture]
+    );
+  };
+
+  // NOUVEAU : Fonction d'enregistrement groupé des réceptions
+  async function enregistrerInfosReception() {
+    if (articlesSelectionnes.length === 0) return;
+
+    const { error } = await supabase
+      .from("fournitures")
+      .update({
+        date_reception: dateReceptionBulk || null,
+        lieu_reception: lieuReceptionBulk || null,
+        reference_commande_fournisseur: refCommandeBulk || null
+      })
+      .in("id", articlesSelectionnes);
+
+    if (!error) {
+      setArticlesSelectionnes([]);
+      setDateReceptionBulk("");
+      setLieuReceptionBulk("");
+      setRefCommandeBulk("");
+      fetchChantierEtFournitures();
+      alert("Informations logistiques enregistrées avec succès !");
+    } else {
+      alert("Erreur lors de l'enregistrement : " + error.message);
+    }
+  }
+
   const formaterDate = (dateString: string) => {
     if (!dateString) return "";
     return new Date(dateString).toLocaleString("fr-FR", {
@@ -217,8 +258,18 @@ export default function PageChantier() {
     });
   };
 
+  const formaterDateCourte = (dateString: string) => {
+    if (!dateString) return "";
+    return new Date(dateString).toLocaleDateString("fr-FR");
+  };
+
   const exporterVersExcel = () => {
-    const enTetes = ["Fournisseur", "Article", "Reference", "Quantite", "Question", "Réponse Client", "Lien", "Photo", "Statut", "Date de validation", "Commandé"];
+    // NOUVEAU : Ajout des colonnes logistiques
+    const enTetes = [
+      "Fournisseur", "Article", "Reference", "Quantite", "Question", "Réponse Client", 
+      "Lien", "Photo", "Statut", "Date de validation", "Commandé", 
+      "Date de réception prévue", "Lieu de retrait", "Réf. Commande Fournisseur"
+    ];
     
     const dateVal = (chantier.statut === "valide" || chantier.statut === "commande_passee") && chantier.date_validation 
       ? formaterDate(chantier.date_validation) 
@@ -235,7 +286,11 @@ export default function PageChantier() {
       `"${(f.photo_url || "").replace(/"/g, '""')}"`,
       f.refuse ? "Refusé" : "Validé",
       `"${dateVal}"`,
-      f.commande_passee ? "Oui" : "Non"
+      f.commande_passee ? "Oui" : "Non",
+      // Ajout des données dans le mappage Excel
+      `"${f.date_reception ? formaterDateCourte(f.date_reception) : ""}"`,
+      `"${(f.lieu_reception || "").replace(/"/g, '""')}"`,
+      `"${(f.reference_commande_fournisseur || "").replace(/"/g, '""')}"`
     ]);
     
     const csvContent = [enTetes.join(";"), ...lignes.map(l => l.join(";"))].join("\n");
@@ -407,16 +462,60 @@ export default function PageChantier() {
         </div>
 
         <div>
+          {/* NOUVEAU : Panneau d'édition groupée des réceptions (Visible si des articles sont cochés) */}
+          {articlesSelectionnes.length > 0 && (
+            <div className="bg-green-100 p-5 rounded-lg border border-green-400 mb-6 shadow-md transition-all">
+              <h3 className="font-bold text-green-900 mb-3 flex items-center gap-2">
+                📦 Infos de logistique pour {articlesSelectionnes.length} article(s) sélectionné(s)
+              </h3>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4">
+                <div>
+                  <label className="block text-xs font-bold text-green-800 mb-1">Date de réception</label>
+                  <input type="date" className="w-full border border-green-300 p-2 rounded focus:outline-none focus:ring-2 focus:ring-green-500 text-sm" value={dateReceptionBulk} onChange={e => setDateReceptionBulk(e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-green-800 mb-1">Lieu de retrait</label>
+                  <input type="text" placeholder="Ex: Leroy Merlin" className="w-full border border-green-300 p-2 rounded focus:outline-none focus:ring-2 focus:ring-green-500 text-sm" value={lieuReceptionBulk} onChange={e => setLieuReceptionBulk(e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-green-800 mb-1">Réf. Fournisseur</label>
+                  <input type="text" placeholder="Ex: LR 1561651" className="w-full border border-green-300 p-2 rounded focus:outline-none focus:ring-2 focus:ring-green-500 text-sm" value={refCommandeBulk} onChange={e => setRefCommandeBulk(e.target.value)} />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={enregistrerInfosReception} className="flex-1 bg-green-700 text-white px-4 py-2 rounded font-bold hover:bg-green-800">
+                  Enregistrer pour les articles cochés
+                </button>
+                <button onClick={() => setArticlesSelectionnes([])} className="bg-white text-green-900 border border-green-400 px-4 py-2 rounded font-bold hover:bg-green-50">
+                  Annuler
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="bg-gray-50 p-6 rounded-lg border border-gray-200 mb-6">
             <h2 className="text-xl font-semibold mb-4">Liste actuelle</h2>
             {fournitures.length === 0 ? <p className="text-gray-500 italic">Vide.</p> : (
               <ul className="space-y-4">
                 {fournitures.map((item) => (
-                  <li key={item.id} className={`flex flex-col p-4 border rounded shadow-sm ${item.refuse ? "bg-red-50 border-red-200" : "bg-white"} ${editingId === item.id ? "border-yellow-400 ring-2 ring-yellow-200" : ""}`}>
-                    <div className="flex gap-4">
+                  <li key={item.id} className={`flex flex-col p-4 border rounded shadow-sm ${item.refuse ? "bg-red-50 border-red-200" : "bg-white"} ${editingId === item.id ? "border-yellow-400 ring-2 ring-yellow-200" : ""} ${articlesSelectionnes.includes(item.id) ? "border-green-400 ring-2 ring-green-100" : ""}`}>
+                    <div className="flex gap-4 items-start">
+                      
+                      {/* NOUVEAU : Case à cocher pour sélection groupée (visible si commandé) */}
+                      {item.commande_passee && (
+                        <input 
+                          type="checkbox" 
+                          className="mt-2 w-5 h-5 cursor-pointer accent-green-600 flex-shrink-0"
+                          checked={articlesSelectionnes.includes(item.id)}
+                          onChange={() => toggleSelection(item.id)}
+                          title="Sélectionner pour grouper la réception"
+                        />
+                      )}
+
                       {item.photo_url && (
                         <img src={item.photo_url} alt="Photo" className={`w-20 h-20 object-cover rounded border ${item.refuse ? "opacity-50 grayscale" : ""}`} />
                       )}
+                      
                       <div className="flex-1">
                         <div className="flex justify-between items-start">
                           <span className={`font-bold ${item.refuse ? "line-through text-red-500" : ""}`}>
@@ -466,6 +565,19 @@ export default function PageChantier() {
                         )}
 
                         {item.refuse && <span className="text-xs font-bold text-red-600 block mt-2">❌ REFUSÉ</span>}
+                        
+                        {/* NOUVEAU : Affichage des informations de réception */}
+                        {(item.date_reception || item.lieu_reception || item.reference_commande_fournisseur) && (
+                          <div className="mt-3 bg-green-50 p-3 rounded border border-green-200 text-sm">
+                             <p className="font-semibold text-green-900 mb-1">📦 Détails de logistique :</p>
+                             <ul className="text-green-800 space-y-1">
+                               {item.date_reception && <li>📅 Date de réception : <strong>{formaterDateCourte(item.date_reception)}</strong></li>}
+                               {item.lieu_reception && <li>📍 Lieu de retrait : <strong>{item.lieu_reception}</strong></li>}
+                               {item.reference_commande_fournisseur && <li>🏷️ Réf. Commande : <strong>{item.reference_commande_fournisseur}</strong></li>}
+                             </ul>
+                          </div>
+                        )}
+
                       </div>
                     </div>
                     
@@ -473,7 +585,6 @@ export default function PageChantier() {
                       <div className="mt-4 pt-3 border-t flex justify-between items-center">
                         <div>
                           <span className="text-sm font-medium text-gray-600 block">État de la commande :</span>
-                          {/* MODIFICATION ICI : Affichage de la date sous "État de la commande :" */}
                           {item.commande_passee && item.date_commande && (
                             <span className="text-xs text-blue-600 font-bold mt-1 inline-block">Commandé le : {formaterDate(item.date_commande)}</span>
                           )}
