@@ -6,7 +6,6 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-// NOUVEAU : Import de la bibliothèque pour le vrai format Excel
 import * as ExcelJS from "exceljs";
 
 export default function PageChantier() {
@@ -268,12 +267,10 @@ export default function PageChantier() {
     return new Date(dateString).toLocaleDateString("fr-FR");
   };
 
-  // MODIFICATION ICI : Création d'un VRAI fichier Excel avec style
   const exporterVersExcel = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Fournitures');
 
-    // 1. Définition des colonnes avec leurs largeurs respectives
     worksheet.columns = [
       { header: 'Fournisseur', key: 'fournisseur', width: 20 },
       { header: 'Article', key: 'article', width: 40 },
@@ -290,10 +287,9 @@ export default function PageChantier() {
       { header: 'Réf. Cde Frs', key: 'ref_fournisseur', width: 20 }
     ];
 
-    // 2. Formatage de l'en-tête (Gras, fond bleu, texte blanc, quadrillage, alignement)
     worksheet.getRow(1).eachCell((cell) => {
       cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } }; // Bleu
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
       cell.border = {
         top: { style: 'thin' }, left: { style: 'thin' },
         bottom: { style: 'thin' }, right: { style: 'thin' }
@@ -306,7 +302,6 @@ export default function PageChantier() {
       ? formaterDate(chantier.date_validation) 
       : "En attente";
 
-    // 3. Ajout et formatage de chaque ligne
     fournitures.forEach((f) => {
       const row = worksheet.addRow({
         fournisseur: f.fournisseur || "-",
@@ -324,7 +319,6 @@ export default function PageChantier() {
         ref_fournisseur: f.reference_commande_fournisseur || "-"
       });
 
-      // Quadrillage et retour à la ligne pour chaque cellule
       row.eachCell((cell) => {
         cell.alignment = { vertical: 'top', wrapText: true };
         cell.border = {
@@ -334,7 +328,6 @@ export default function PageChantier() {
       });
     });
 
-    // 4. Création du fichier et téléchargement
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const link = document.createElement("a");
@@ -504,6 +497,14 @@ export default function PageChantier() {
         </div>
 
         <div>
+          {/* NOUVEAU : Affichage du commentaire global du client */}
+          {chantier.commentaire_client && (
+            <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 mb-6">
+              <h3 className="font-bold text-blue-900 mb-1">💬 Remarque du client :</h3>
+              <p className="text-sm text-blue-800 italic whitespace-pre-wrap">"{chantier.commentaire_client}"</p>
+            </div>
+          )}
+
           {articlesSelectionnes.length > 0 && (
             <div className="bg-green-100 p-5 rounded-lg border border-green-400 mb-6 shadow-md transition-all">
               <h3 className="font-bold text-green-900 mb-3 flex items-center gap-2">
@@ -537,7 +538,7 @@ export default function PageChantier() {
                   <input type="text" placeholder="Ex: Leroy Merlin" className="w-full border border-green-300 p-2 rounded focus:outline-none focus:ring-2 focus:ring-green-500 text-sm" value={lieuReceptionBulk} onChange={e => setLieuReceptionBulk(e.target.value)} />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-green-800 mb-1">Réf. Commande</label>
+                  <label className="block text-xs font-bold text-green-800 mb-1">Réf. Fournisseur</label>
                   <input type="text" placeholder="Ex: LR 1561651" className="w-full border border-green-300 p-2 rounded focus:outline-none focus:ring-2 focus:ring-green-500 text-sm" value={refCommandeBulk} onChange={e => setRefCommandeBulk(e.target.value)} />
                 </div>
               </div>
