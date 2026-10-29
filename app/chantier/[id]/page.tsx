@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useParams } from "next/navigation";
 import Link from "next/link";
@@ -35,6 +35,15 @@ export default function PageChantier() {
   const [refCommandeBulk, setRefCommandeBulk] = useState("");
   const [receptionADefinirBulk, setReceptionADefinirBulk] = useState(false);
 
+  // Consignes pour le conducteur de travaux : enregistrees dans les memos existants
+  // du chantier pour eviter toute modification du schema de la base Supabase.
+  const ID_CONSIGNES_CONDUCTEUR = "fiche_chantier_conducteur";
+  const [consignesConducteur, setConsignesConducteur] = useState("");
+  const [consignesEnregistrees, setConsignesEnregistrees] = useState("");
+  const [sauvegardeConsignesEnCours, setSauvegardeConsignesEnCours] = useState(false);
+  const [generationFicheEnCours, setGenerationFicheEnCours] = useState(false);
+  const consignesChargeesPour = useRef<string | null>(null);
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       if (!data.session) {
@@ -51,7 +60,19 @@ export default function PageChantier() {
 
   async function fetchChantierEtFournitures() {
     const { data: chantierData } = await supabase.from("chantiers").select("*").eq("id", id).single();
-    if (chantierData) setChantier(chantierData);
+    if (chantierData) {
+      setChantier(chantierData);
+      // Ne pas effacer les consignes en cours de saisie lors de l'actualisation
+      // des fournitures ou du statut du chantier.
+      if (consignesChargeesPour.current !== id) {
+        const memos = Array.isArray(chantierData.historique_memos) ? chantierData.historique_memos : [];
+        const note = memos.find((memo: any) => memo.id === ID_CONSIGNES_CONDUCTEUR);
+        const texte = typeof note?.texte === "string" ? note.texte : "";
+        setConsignesConducteur(texte);
+        setConsignesEnregistrees(texte);
+        consignesChargeesPour.current = id;
+      }
+    }
 
     const { data: fournituresData } = await supabase.from("fournitures").select("*").eq("chantier_id", id).order("created_at", { ascending: true });
     if (fournituresData) setFournitures(fournituresData);
@@ -255,6 +276,47 @@ export default function PageChantier() {
     }
   }
 
+  async function enregistrerConsignesConducteur() {
+    if (!id || sauvegardeConsignesEnCours) return;
+    setSauvegardeConsignesEnCours(true);
+    try {
+      // Recuperer les memos les plus recents pour ne pas ecraser les autres memos.
+      const { data, error: erreurLecture } = await supabase
+        .from("chantiers")
+        .select("historique_memos")
+        .eq("id", id)
+        .single();
+      if (erreurLecture) throw erreurLecture;
+
+      const memos: any[] = Array.isArray(data?.historique_memos) ? data.historique_memos : [];
+      const autresMemos = memos.filter((memo) => memo.id !== ID_CONSIGNES_CONDUCTEUR);
+      const texte = consignesConducteur.trim();
+      const memosMisAJour = texte
+        ? [...autresMemos, {
+            id: ID_CONSIGNES_CONDUCTEUR,
+            texte,
+            date: new Date().toISOString(),
+            type: "consignes_conducteur"
+          }]
+        : autresMemos;
+
+      const { error: erreurSauvegarde } = await supabase
+        .from("chantiers")
+        .update({ historique_memos: memosMisAJour })
+        .eq("id", id);
+      if (erreurSauvegarde) throw erreurSauvegarde;
+
+      setConsignesConducteur(texte);
+      setConsignesEnregistrees(texte);
+      setChantier((precedent: any) => precedent ? { ...precedent, historique_memos: memosMisAJour } : precedent);
+      alert("Consignes du conducteur de travaux enregistrees.");
+    } catch (erreur: any) {
+      alert("Impossible d'enregistrer les consignes : " + (erreur?.message || "Erreur inconnue"));
+    } finally {
+      setSauvegardeConsignesEnCours(false);
+    }
+  }
+
   const formaterDate = (dateString: string) => {
     if (!dateString) return "";
     return new Date(dateString).toLocaleString("fr-FR", {
@@ -358,6 +420,201 @@ export default function PageChantier() {
     link.click();
   };
 
+  // Convertir une photo distante en JPEG pour l'inserer dans un PDF.
+  // En cas d'URL inaccessible, la fiche reste telechargeable sans cette photo.
+  const photoVersJPEG = async (url: string): Promise<{ data: string; largeur: number; hauteur: number } | null> => {
+    let urlLocale: string | null = null;
+    try {
+      const reponse = await fetch(url);
+      if (!reponse.ok) return null;
+      const fichier = await reponse.blob();
+      urlLocale = URL.createObjectURL(fichier);
+      const image = new Image();
+      image.src = urlLocale;
+      await image.decode();
+
+      // Limiter le poids du PDF et gerer egalement les formats PNG, WebP, etc.
+      const facteur = Math.min(1, 650 / Math.max(image.naturalWidth, image.naturalHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * facteur));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * facteur));
+      const contexte = canvas.getContext("2d");
+      if (!contexte) return null;
+      contexte.fillStyle = "white";
+      contexte.fillRect(0, 0, canvas.width, canvas.height);
+      contexte.drawImage(image, 0, 0, canvas.width, canvas.height);
+      return { data: canvas.toDataURL("image/jpeg", 0.78), largeur: canvas.width, hauteur: canvas.height };
+    } catch {
+      return null;
+    } finally {
+      if (urlLocale) URL.revokeObjectURL(urlLocale);
+    }
+  };
+
+  const exporterFicheChantierPDF = async () => {
+    if (!chantier || generationFicheEnCours) return;
+    setGenerationFicheEnCours(true);
+    try {
+      // A4 paysage pour conserver les sept colonnes demandees.
+      const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+      const largeurPage = doc.internal.pageSize.getWidth();
+      const hauteurPage = doc.internal.pageSize.getHeight();
+      const marge = 10;
+      const colonnes = [
+        "Article / photo",
+        "Quantité",
+        "Date de réception",
+        "Fournisseur / lieu de retrait",
+        "Référence",
+        "Question posée",
+        "Réponse client"
+      ];
+
+      // Inclure toutes les lignes, en signalant les fournitures refusees.
+      const lignes = fournitures.map((article) => [
+        `${nettoyerValeurExcel(article.designation || "Article sans nom")}${article.refuse ? " (REFUSÉ)" : ""}`,
+        nettoyerValeurExcel(article.quantite),
+        article.reception_a_definir
+          ? "À définir"
+          : article.date_reception
+            ? formaterDateCourte(article.date_reception)
+            : "Non renseignée",
+        [article.fournisseur ? `Fournisseur : ${nettoyerValeurExcel(article.fournisseur)}` : "",
+         article.lieu_reception ? `Retrait : ${nettoyerValeurExcel(article.lieu_reception)}` : ""].filter(Boolean).join("\n") || "-",
+        nettoyerValeurExcel(article.reference) || "-",
+        nettoyerValeurExcel(article.question_artisan) || "-",
+        nettoyerValeurExcel(article.reponse_client) || "-"
+      ]);
+
+      // Charger toutes les photos avant de dessiner le tableau.
+      const photos = await Promise.all(fournitures.map((article) =>
+        article.photo_url ? photoVersJPEG(article.photo_url) : Promise.resolve(null)
+      ));
+      const photosIndisponibles = fournitures.filter((article, index) => article.photo_url && !photos[index]).length;
+
+      doc.setTextColor(25, 38, 59);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(17);
+      doc.text("FICHE DE FOURNITURES - CONDUCTEUR DE TRAVAUX", marge, 15);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text(`Chantier : ${nettoyerValeurExcel(chantier.nom_client) || "Non renseigné"}`, marge, 22);
+      if (chantier.adresse_client) {
+        const adresse = doc.splitTextToSize(`Adresse : ${nettoyerValeurExcel(chantier.adresse_client)}`, largeurPage - 85);
+        doc.text(adresse.slice(0, 2), marge, 27);
+      }
+      doc.setFontSize(9);
+      doc.text(`Editee le ${new Date().toLocaleDateString("fr-FR")}`, largeurPage - marge, 22, { align: "right" });
+
+      autoTable(doc, {
+        head: [colonnes],
+        body: lignes.length ? lignes : [["Aucune fourniture", "", "", "", "", "", ""]],
+        startY: 37,
+        margin: { top: 16, right: marge, bottom: 17, left: marge },
+        theme: "grid",
+        tableWidth: largeurPage - 2 * marge,
+        styles: {
+          font: "helvetica",
+          fontSize: 8,
+          cellPadding: 2.1,
+          overflow: "linebreak",
+          valign: "top",
+          lineWidth: 0.16,
+          lineColor: [213, 221, 232],
+          textColor: [31, 41, 55]
+        },
+        headStyles: {
+          fillColor: [32, 70, 115],
+          textColor: [255, 255, 255],
+          fontStyle: "bold",
+          fontSize: 8,
+          valign: "middle"
+        },
+        alternateRowStyles: { fillColor: [245, 248, 252] },
+        columnStyles: {
+          0: { cellWidth: 63 },
+          1: { cellWidth: 13, halign: "center" },
+          2: { cellWidth: 26 },
+          3: { cellWidth: 46 },
+          4: { cellWidth: 26 },
+          5: { cellWidth: 51 },
+          6: { cellWidth: 52 }
+        },
+        didParseCell: (donnees) => {
+          if (donnees.section === "body" && donnees.column.index === 0 && photos[donnees.row.index]) {
+            // Garder une zone libre sous le texte pour l'image (18 mm).
+            const texte = String(lignes[donnees.row.index]?.[0] || "");
+            const nbLignes = doc.splitTextToSize(texte, 58).length;
+            donnees.cell.styles.minCellHeight = Math.max(27, nbLignes * 3.3 + 23);
+          }
+        },
+        didDrawCell: (donnees) => {
+          if (donnees.section !== "body" || donnees.column.index !== 0) return;
+          const photo = photos[donnees.row.index];
+          if (!photo) return;
+          try {
+            // Photo sous la designation, sans deformation de ses proportions.
+            const facteurPhoto = Math.min(18 / photo.largeur, 18 / photo.hauteur);
+            const largeurPhoto = photo.largeur * facteurPhoto;
+            const hauteurPhoto = photo.hauteur * facteurPhoto;
+            doc.addImage(
+              photo.data, "JPEG",
+              donnees.cell.x + 2, donnees.cell.y + donnees.cell.height - 20,
+              largeurPhoto, hauteurPhoto
+            );
+          } catch {
+            // Une photo non compatible ne doit pas interrompre tout l'export.
+          }
+        }
+      });
+
+      // Les deux encadres figurent SOUS le tableau, y compris si plusieurs pages.
+      const ajouterEncadre = (titre: string, texte: string, couleur: [number, number, number]) => {
+        const tableau = (doc as any).lastAutoTable;
+        let debutY = (tableau?.finalY ?? 37) + 7;
+        if (debutY > hauteurPage - 30) {
+          doc.addPage();
+          debutY = 18;
+        }
+        autoTable(doc, {
+          head: [[titre]],
+          body: [[texte.trim() || "Aucune remarque."]],
+          startY: debutY,
+          margin: { top: 16, left: marge, right: marge, bottom: 17 },
+          tableWidth: largeurPage - 2 * marge,
+          theme: "grid",
+          styles: { font: "helvetica", fontSize: 9, cellPadding: 4, overflow: "linebreak", lineColor: [213, 221, 232] },
+          headStyles: { fillColor: couleur, fontStyle: "bold", textColor: [255, 255, 255] },
+          bodyStyles: { fillColor: [248, 250, 252], textColor: [31, 41, 55] }
+        });
+      };
+
+      ajouterEncadre("REMARQUES DU CLIENT", nettoyerValeurExcel(chantier.commentaire_client) || "Aucune remarque du client.", [39, 103, 164]);
+      ajouterEncadre("CONSIGNES POUR LE CONDUCTEUR DE TRAVAUX", nettoyerValeurExcel(consignesConducteur) || "Aucune consigne particulière.", [40, 97, 76]);
+
+      const totalPages = doc.getNumberOfPages();
+      for (let numero = 1; numero <= totalPages; numero++) {
+        doc.setPage(numero);
+        doc.setDrawColor(218, 226, 235);
+        doc.line(marge, hauteurPage - 11, largeurPage - marge, hauteurPage - 11);
+        doc.setFontSize(8);
+        doc.setTextColor(110, 122, 136);
+        doc.text(`Fiche de fournitures - ${nettoyerValeurExcel(chantier.nom_client) || "Chantier"}`, marge, hauteurPage - 7);
+        doc.text(`Page ${numero} / ${totalPages}`, largeurPage - marge, hauteurPage - 7, { align: "right" });
+      }
+
+      const nomFichier = (chantier.nom_client || "Chantier").replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, "_");
+      doc.save(`Fiche_Fournitures_Chantier_${nomFichier}.pdf`);
+      if (photosIndisponibles > 0) {
+        alert(`${photosIndisponibles} photo(s) n'ont pas pu etre chargees. Le PDF a ete genere sans elles.`);
+      }
+    } catch (erreur: any) {
+      alert("Erreur pendant la generation du PDF : " + (erreur?.message || "Erreur inconnue"));
+    } finally {
+      setGenerationFicheEnCours(false);
+    }
+  };
+
   const telechargerPreuvePDF = () => {
     if (chantier.statut !== "valide" && chantier.statut !== "commande_passee") {
       alert("Le chantier n'a pas encore été validé par le client.");
@@ -365,26 +622,95 @@ export default function PageChantier() {
     }
 
     const doc = new jsPDF();
-    
-    doc.setFontSize(18);
-    doc.text("Certificat de Validation des Fournitures", 14, 20);
-    
+    const marge = 14;
+    const largeurPage = doc.internal.pageSize.getWidth();
+    const hauteurPage = doc.internal.pageSize.getHeight();
+
+    // Reconstituer l'historique sans doublonner la dernière date, qui est également
+    // conservée dans date_validation. Les deux champs existent déjà dans Supabase.
+    const datesEnregistrees = new Set<number>();
+    const ajouterDate = (valeur: unknown) => {
+      if (typeof valeur !== "string" || !valeur.trim()) return;
+      const horodatage = new Date(valeur).getTime();
+      if (Number.isFinite(horodatage)) datesEnregistrees.add(horodatage);
+    };
+
+    if (Array.isArray(chantier.historique_validations)) {
+      chantier.historique_validations.forEach(ajouterDate);
+    }
+    ajouterDate(chantier.date_validation);
+
+    const datesValidations = Array.from(datesEnregistrees)
+      .sort((premiere, suivante) => premiere - suivante)
+      .map((horodatage) => new Date(horodatage));
+
+    // Fuseau horaire français, indépendamment des réglages de l'ordinateur utilisé.
+    const formaterHorodatage = (date: Date) => date.toLocaleString("fr-FR", {
+      timeZone: "Europe/Paris",
+      day: "2-digit", month: "2-digit", year: "numeric",
+      hour: "2-digit", minute: "2-digit"
+    });
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(17);
+    doc.text("Certificat de validation des fournitures", marge, 20);
+
+    doc.setFont("helvetica", "normal");
     doc.setFontSize(11);
-    doc.text(`Chantier / Client : ${chantier.nom_client}`, 14, 30);
-    
-    const dateValidation = chantier.date_validation 
-      ? formaterDate(chantier.date_validation) 
-      : "Date inconnue";
-      
-    doc.text(`Date de validation officielle : ${dateValidation}`, 14, 36);
-    doc.text("Ce document atteste l'approbation des fournitures listées ci-dessous.", 14, 42);
+    doc.text(`Chantier / Client : ${chantier.nom_client || "Non renseigné"}`, marge, 29);
+    doc.text(
+      `Dernière validation enregistrée : ${datesValidations.length ? formaterHorodatage(datesValidations[datesValidations.length - 1]) : "Date inconnue"}`,
+      marge, 36
+    );
+    doc.setFontSize(9);
+    doc.text("Ce document présente les validations enregistrées et la liste actuelle des fournitures approuvées.", marge, 42);
+
+    // Historique complet, y compris après ajout ou modification de fournitures.
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("HISTORIQUE DES VALIDATIONS", marge, 51);
+
+    autoTable(doc, {
+      head: [["N°", "Étape", "Date et heure de validation"]],
+      body: datesValidations.length
+        ? datesValidations.map((date, index) => [
+            String(index + 1),
+            index === 0 ? "Validation initiale" : `Validation complémentaire n° ${index + 1}`,
+            formaterHorodatage(date)
+          ])
+        : [["-", "Historique indisponible", "Aucune date enregistrée"]],
+      startY: 55,
+      margin: { left: marge, right: marge, top: 18, bottom: 18 },
+      theme: "grid",
+      styles: { font: "helvetica", fontSize: 9, cellPadding: 2.5 },
+      headStyles: { fillColor: [45, 75, 110], textColor: [255, 255, 255], fontStyle: "bold" },
+      alternateRowStyles: { fillColor: [245, 248, 252] },
+      columnStyles: {
+        0: { cellWidth: 17, halign: "center" },
+        1: { cellWidth: 85 },
+        2: { cellWidth: 80 }
+      }
+    });
+
+    // Le tableau des fournitures suit l'historique, même si celui-ci prend
+    // plusieurs pages. Le PDF correspond à l'état ACTUEL du chantier.
+    const finHistorique = (doc as any).lastAutoTable?.finalY ?? 55;
+    let titreFournituresY = finHistorique + 12;
+    if (titreFournituresY > hauteurPage - 36) {
+      doc.addPage();
+      titreFournituresY = 22;
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("FOURNITURES VALIDÉES - LISTE ACTUELLE", marge, titreFournituresY);
 
     const colonnes = ["Désignation", "Qté", "Fournisseur", "Référence", "Réponse Client"];
     const lignes = fournitures
-      .filter(item => !item.refuse) 
-      .map(item => [
-        item.designation,
-        item.quantite,
+      .filter((item) => !item.refuse)
+      .map((item) => [
+        item.designation || "-",
+        item.quantite || "-",
         item.fournisseur || "-",
         item.reference || "-",
         item.reponse_client || "-"
@@ -392,13 +718,30 @@ export default function PageChantier() {
 
     autoTable(doc, {
       head: [colonnes],
-      body: lignes,
-      startY: 50,
+      body: lignes.length ? lignes : [["Aucune fourniture validée", "", "", "", ""]],
+      startY: titreFournituresY + 4,
+      margin: { left: marge, right: marge, top: 18, bottom: 18 },
       theme: "grid",
+      styles: { font: "helvetica", fontSize: 9, cellPadding: 2.5, overflow: "linebreak" },
       headStyles: { fillColor: [41, 128, 185] }
     });
 
-    doc.save(`Preuve_Validation_${chantier.nom_client.replace(/\s+/g, '_')}.pdf`);
+    // Pied de page numéroté pour les historiques et listes sur plusieurs pages.
+    const totalPages = doc.getNumberOfPages();
+    for (let page = 1; page <= totalPages; page++) {
+      doc.setPage(page);
+      doc.setDrawColor(220, 225, 231);
+      doc.line(marge, hauteurPage - 12, largeurPage - marge, hauteurPage - 12);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(100, 110, 120);
+      doc.text(`Preuve de validation - ${chantier.nom_client || "Chantier"}`, marge, hauteurPage - 8);
+      doc.text(`Page ${page} / ${totalPages}`, largeurPage - marge, hauteurPage - 8, { align: "right" });
+    }
+
+    const nomFichier = (chantier.nom_client || "Chantier")
+      .replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, "_");
+    doc.save(`Preuve_Validation_${nomFichier}.pdf`);
   };
 
   if (!estAuthentifie) {
@@ -418,8 +761,9 @@ export default function PageChantier() {
           <p className="text-gray-600 mt-1">STATUT : <strong className="uppercase">{chantier.statut === 'brouillon' ? 'EN COURS DE MODIFICATION' : chantier.statut}</strong></p>
         </div>
         <div className="text-right flex flex-col items-end gap-2">
-           <div className="flex gap-2">
+           <div className="flex gap-2 flex-wrap justify-end">
              <button onClick={exporterVersExcel} className="bg-green-600 text-white px-4 py-2 rounded font-bold hover:bg-green-700">📊 Exporter Excel</button>
+             <button onClick={exporterFicheChantierPDF} disabled={generationFicheEnCours} className="bg-indigo-700 text-white px-4 py-2 rounded font-bold hover:bg-indigo-800 disabled:opacity-60">{generationFicheEnCours ? "Preparation du PDF..." : "📄 Fiche chantier PDF"}</button>
              {(chantier.statut === "valide" || chantier.statut === "commande_passee") && (
                <button onClick={telechargerPreuvePDF} className="bg-blue-600 text-white px-4 py-2 rounded font-bold hover:bg-blue-700">📄 Preuve PDF</button>
              )}
@@ -452,6 +796,37 @@ export default function PageChantier() {
           )}
         </div>
       </div>
+
+      {/* Consignes internes propres a la fiche PDF du conducteur de travaux */}
+      <section className="mb-8 p-5 rounded-lg border border-indigo-200 bg-indigo-50">
+        <h2 className="font-bold text-indigo-900 text-lg mb-1">📋 Consignes pour la fiche chantier PDF</h2>
+        <p className="text-sm text-indigo-800 mb-3">
+          Indique ici les informations utiles au conducteur de travaux : livraison, stockage,
+          preparation, points de vigilance, etc. Ces consignes seront reprises sous le tableau du PDF.
+        </p>
+        <textarea
+          className="w-full min-h-28 border border-indigo-300 rounded-md p-3 bg-white text-gray-900"
+          rows={4}
+          value={consignesConducteur}
+          onChange={(e) => setConsignesConducteur(e.target.value)}
+          placeholder="Ex. : Receptionner le carrelage avant le debut des travaux et verifier les references sur les colis."
+        />
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={enregistrerConsignesConducteur}
+            disabled={sauvegardeConsignesEnCours || consignesConducteur.trim() === consignesEnregistrees}
+            className="rounded-md bg-indigo-700 text-white font-semibold px-4 py-2 hover:bg-indigo-800 disabled:opacity-50"
+          >
+            {sauvegardeConsignesEnCours ? "Enregistrement..." : "Enregistrer les consignes"}
+          </button>
+          <span className="text-sm text-indigo-800">
+            {consignesConducteur.trim() !== consignesEnregistrees
+              ? "Modifications non enregistrees (elles seront tout de meme dans le PDF genere maintenant)."
+              : "Consignes enregistrees pour ce chantier."}
+          </span>
+        </div>
+      </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className={`p-6 rounded-lg border h-fit transition-colors ${editingId ? "bg-yellow-50 border-yellow-300 shadow-md" : "bg-white border-gray-200"}`}>
