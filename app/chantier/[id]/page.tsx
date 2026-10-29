@@ -155,7 +155,9 @@ export default function PageChantier() {
       lien, 
       question_artisan: questionArtisan,
       est_valide: false,
-      refuse: false
+      refuse: false,
+      // Toute modification exige une nouvelle validation de cet article.
+      numero_validation_client: null
     };
 
     if (photoUrlFinal) {
@@ -826,31 +828,49 @@ export default function PageChantier() {
     doc.setFontSize(11);
     doc.text("LISTE ACTUELLE - VALIDATIONS CLIENT ET COMMANDES EXCEPTIONNELLES", marge, titreFournituresY);
 
-    const colonnes = ["Article", "Qté", "Fournisseur", "Référence", "Réponse client", "Statut / justification"];
-    const lignes = fournitures
-      .filter((item) => item.commande_sans_validation_client || (item.est_valide && !item.refuse))
-      .map((item) => [
-        nettoyerValeurExcel(item.designation) || "-",
-        nettoyerValeurExcel(item.quantite) || "-",
-        nettoyerValeurExcel(item.fournisseur) || "-",
-        nettoyerValeurExcel(item.reference) || "-",
-        nettoyerValeurExcel(item.reponse_client) || "-",
-        item.commande_sans_validation_client
-          ? `${item.refuse ? "REFUSÉ PAR LE CLIENT - " : ""}NON VALIDÉ PAR LE CLIENT pour cette commande. Commandé par l'entreprise le ${item.date_commande_sans_validation ? formaterHorodatage(new Date(item.date_commande_sans_validation)) : "date inconnue"}. Motif : ${nettoyerValeurExcel(item.justification_commande_sans_validation) || "Non renseigné"}`
-          : "Validé par le client"
-      ]);
+    // Une colonne par article : une validation effectuée lors de l'étape 3
+    // porte « 3 », même si d'autres articles ont été approuvés à l'étape 1.
+    // Les données antérieures à cette mise à jour n'ont pas de numéro enregistré.
+    // Si une seule étape existe, on peut l'attribuer aux articles déjà approuvés ;
+    // avec plusieurs étapes, on n'invente pas leur numéro historique.
+    const fournituresCertificat = fournitures.filter((item) =>
+      item.commande_sans_validation_client || (item.est_valide && !item.refuse)
+    );
+    const numerosHistoriquesInconnus = fournituresCertificat.some((item) =>
+      !item.commande_sans_validation_client &&
+      (!Number.isInteger(item.numero_validation_client) || item.numero_validation_client < 1) &&
+      datesValidations.length !== 1
+    );
+    const aDesCommandesSansValidation = fournituresCertificat.some((item) => item.commande_sans_validation_client);
+
+    const colonnes = ["Article", "Qté", "Fournisseur", "Référence", "Réponse client", "Statut / justification", "N° de validation"];
+    const lignes = fournituresCertificat.map((item) => [
+      nettoyerValeurExcel(item.designation) || "-",
+      nettoyerValeurExcel(item.quantite) || "-",
+      nettoyerValeurExcel(item.fournisseur) || "-",
+      nettoyerValeurExcel(item.reference) || "-",
+      nettoyerValeurExcel(item.reponse_client) || "-",
+      item.commande_sans_validation_client
+        ? `${item.refuse ? "REFUSÉ PAR LE CLIENT - " : ""}NON VALIDÉ PAR LE CLIENT pour cette commande. Commandé par l'entreprise le ${item.date_commande_sans_validation ? formaterHorodatage(new Date(item.date_commande_sans_validation)) : "date inconnue"}. Motif : ${nettoyerValeurExcel(item.justification_commande_sans_validation) || "Non renseigné"}`
+        : "Validé par le client",
+      item.commande_sans_validation_client ? "S/V" :
+        Number.isInteger(item.numero_validation_client) && item.numero_validation_client >= 1
+          ? String(item.numero_validation_client)
+          : datesValidations.length === 1 ? "1" : "—"
+    ]);
 
     autoTable(doc, {
       head: [colonnes],
-      body: lignes.length ? lignes : [["Aucune fourniture avec validation ou commande", "", "", "", "", ""]],
+      body: lignes.length ? lignes : [["Aucune fourniture avec validation ou commande", "", "", "", "", "", ""]],
       startY: titreFournituresY + 4,
       margin: { left: marge, right: marge, top: 18, bottom: 18 },
       theme: "grid",
       styles: { font: "helvetica", fontSize: 8, cellPadding: 2.3, overflow: "linebreak", valign: "top" },
       headStyles: { fillColor: [41, 128, 185] },
       columnStyles: {
-        0: { cellWidth: 36 }, 1: { cellWidth: 11 }, 2: { cellWidth: 24 },
-        3: { cellWidth: 20 }, 4: { cellWidth: 30 }, 5: { cellWidth: 61 }
+        0: { cellWidth: 32 }, 1: { cellWidth: 10 }, 2: { cellWidth: 22 },
+        3: { cellWidth: 19 }, 4: { cellWidth: 27 }, 5: { cellWidth: 53 },
+        6: { cellWidth: 19, halign: "center", fontStyle: "bold" }
       },
       didParseCell: (cell) => {
         if (cell.section === "body" && cell.column.index === 5 &&
@@ -861,6 +881,21 @@ export default function PageChantier() {
         }
       }
     });
+
+    // Légende explicite : ne jamais assimiler une commande exceptionnelle
+    // à une approbation par le client, ni attribuer au hasard une étape ancienne.
+    const explicationsNumero: string[] = [];
+    if (aDesCommandesSansValidation) explicationsNumero.push("S/V : commande sans validation du client.");
+    if (numerosHistoriquesInconnus) explicationsNumero.push("— : étape inconnue pour une validation antérieure à ce suivi par article.");
+    if (explicationsNumero.length > 0) {
+      autoTable(doc, {
+        body: explicationsNumero.map((explication) => [explication]),
+        startY: ((doc as any).lastAutoTable?.finalY ?? titreFournituresY + 4) + 3,
+        margin: { left: marge, right: marge, top: 18, bottom: 18 },
+        theme: "plain",
+        styles: { font: "helvetica", fontSize: 8, textColor: [89, 101, 116], cellPadding: 1.2 }
+      });
+    }
 
     // Pied de page numéroté pour les historiques et listes sur plusieurs pages.
     const totalPages = doc.getNumberOfPages();

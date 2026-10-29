@@ -59,6 +59,19 @@ export default function PageValidationClient() {
     setValidationEnCours(true);
     
     try {
+      // Un numéro identique pour tous les articles approuvés lors de cette
+      // validation ; le prochain numéro est l'étape suivante du certificat.
+      // date_validation est aussi comptée pour les anciens chantiers dont
+      // l'historique n'aurait pas encore été initialisé.
+      const datesDejaValidees = [
+        ...(Array.isArray(chantier.historique_validations) ? chantier.historique_validations : []),
+        chantier.date_validation
+      ].filter((valeur: unknown): valeur is string =>
+        typeof valeur === "string" && !!valeur.trim() && !Number.isNaN(new Date(valeur).getTime())
+      );
+      const nombreEtapesExistantes = new Set(datesDejaValidees.map((date) => new Date(date).getTime())).size;
+      const numeroValidationCourante = nombreEtapesExistantes + 1;
+
       for (const item of fournitures) {
         // Une commande exceptionnelle n'est jamais validée automatiquement par le client.
         // Cet article reste explicitement « non validé par le client ».
@@ -69,6 +82,8 @@ export default function PageValidationClient() {
           const { error: errFourniture } = await supabase.from("fournitures").update({ 
             refuse: estRefuse,
             est_valide: true,
+            // Le numéro désigne une approbation de l'article, pas un refus.
+            numero_validation_client: estRefuse ? null : numeroValidationCourante,
             reponse_client: reponseClient 
           }).eq("id", item.id);
 
