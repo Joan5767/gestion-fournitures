@@ -15,14 +15,14 @@ export default function PageValidationClient() {
   const [validationEnCours, setValidationEnCours] = useState(false);
   
   const [reponses, setReponses] = useState<{ [key: string]: string }>({});
-  const [commentaireClient, setCommentaireClient] = useState("");
+  // MODIFICATION : État pour le NOUVEAU commentaire uniquement
+  const [nouveauCommentaire, setNouveauCommentaire] = useState("");
 
   useEffect(() => {
     async function fetchDonnees() {
       const { data: chantierData } = await supabase.from("chantiers").select("*").eq("token_validation", token).single();
       if (chantierData) {
         setChantier(chantierData);
-        setCommentaireClient(chantierData.commentaire_client || "");
 
         const { data: fournituresData } = await supabase.from("fournitures").select("*").eq("chantier_id", chantierData.id).order("created_at", { ascending: true });
         if (fournituresData) {
@@ -73,16 +73,23 @@ export default function PageValidationClient() {
         }
       }
       
-      // NOUVEAU : On gère l'historique des validations
+      // MODIFICATION : Construction de l'historique des commentaires
+      let commentaireFinal = chantier.commentaire_client || "";
+      if (nouveauCommentaire.trim()) {
+        const dateAjout = new Date().toLocaleString("fr-FR", { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        const separateur = commentaireFinal ? "\n\n" : "";
+        commentaireFinal = `${commentaireFinal}${separateur}--- Ajouté le ${dateAjout} ---\n${nouveauCommentaire.trim()}`;
+      }
+      
       const currentDate = new Date().toISOString();
       const historiqueActuel = chantier.historique_validations || [];
       const nouvelHistorique = [...historiqueActuel, currentDate];
 
       const { error: errChantier } = await supabase.from("chantiers").update({ 
         statut: "valide", 
-        date_validation: currentDate, // On garde la date principale à jour
-        historique_validations: nouvelHistorique, // On enregistre toute la liste
-        commentaire_client: commentaireClient
+        date_validation: currentDate,
+        historique_validations: nouvelHistorique,
+        commentaire_client: commentaireFinal // On enregistre le texte cumulé
       }).eq("id", chantier.id);
       
       if (errChantier) {
@@ -202,15 +209,25 @@ export default function PageValidationClient() {
       </div>
 
       <div className="bg-gray-50 p-4 rounded-md mb-6 border">
-        <h2 className="font-semibold text-gray-800 mb-2">📝 Remarque générale (Optionnel) :</h2>
-        <textarea
-          className="w-full border border-gray-300 p-3 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-600"
-          rows={4}
-          placeholder="Une information complémentaire à transmettre à votre artisan ? Tapez-la ici..."
-          value={commentaireClient}
-          onChange={(e) => setCommentaireClient(e.target.value)}
-          disabled={toutEstValide}
-        ></textarea>
+        <h2 className="font-semibold text-gray-800 mb-2">📝 Remarque générale :</h2>
+        
+        {/* MODIFICATION : On affiche l'historique des remarques figees */}
+        {chantier.commentaire_client && (
+          <div className="mb-4 bg-white p-3 rounded border border-gray-200 text-gray-700 whitespace-pre-wrap text-sm">
+            {chantier.commentaire_client}
+          </div>
+        )}
+
+        {/* MODIFICATION : Champ uniquement pour AJOUTER un nouveau message */}
+        {!toutEstValide && (
+          <textarea
+            className="w-full border border-gray-300 p-3 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            rows={3}
+            placeholder={chantier.commentaire_client ? "Ajouter une remarque supplémentaire..." : "Une information complémentaire à transmettre à votre artisan ? Tapez-la ici..."}
+            value={nouveauCommentaire}
+            onChange={(e) => setNouveauCommentaire(e.target.value)}
+          ></textarea>
+        )}
       </div>
 
       {toutEstValide ? (
