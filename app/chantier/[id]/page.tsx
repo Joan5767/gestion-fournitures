@@ -267,6 +267,26 @@ export default function PageChantier() {
     return new Date(dateString).toLocaleDateString("fr-FR");
   };
 
+  // Excel (.xlsx) stocke les textes dans du XML : certains caractères Unicode y sont interdits.
+  // On les retire tout en conservant accents, retours à la ligne et emojis valides.
+  const nettoyerValeurExcel = (valeur: unknown): string => {
+    if (valeur === null || valeur === undefined) return "";
+
+    return Array.from(String(valeur))
+      .filter((caractere) => {
+        const point = caractere.codePointAt(0)!;
+        return (
+          point === 0x09 ||
+          point === 0x0a ||
+          point === 0x0d ||
+          (point >= 0x20 && point <= 0xd7ff) ||
+          (point >= 0xe000 && point <= 0xfffd) ||
+          (point >= 0x10000 && point <= 0x10ffff)
+        );
+      })
+      .join("");
+  };
+
   const exporterVersExcel = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Fournitures');
@@ -303,21 +323,20 @@ export default function PageChantier() {
       : "";
 
     fournitures.forEach((f) => {
-      // CORRECTION : On remplace tous les || "-" par || "" pour éviter l'erreur de formule Excel
       const row = worksheet.addRow({
-        fournisseur: f.fournisseur || "",
-        article: f.designation || "",
-        reference: f.reference || "",
-        quantite: f.quantite || "",
-        question: f.question_artisan || "",
-        reponse: f.reponse_client || "",
-        lien: f.lien || "",
+        fournisseur: nettoyerValeurExcel(f.fournisseur),
+        article: nettoyerValeurExcel(f.designation),
+        reference: nettoyerValeurExcel(f.reference),
+        quantite: nettoyerValeurExcel(f.quantite),
+        question: nettoyerValeurExcel(f.question_artisan),
+        reponse: nettoyerValeurExcel(f.reponse_client),
+        lien: nettoyerValeurExcel(f.lien),
         statut: f.refuse ? "Refusé" : "Validé",
         date_val: dateValGlobal,
         commande: f.commande_passee ? "Oui" : "Non",
         date_reception: f.reception_a_definir ? "À définir" : (f.date_reception ? formaterDateCourte(f.date_reception) : ""),
-        lieu: f.lieu_reception || "",
-        ref_fournisseur: f.reference_commande_fournisseur || ""
+        lieu: nettoyerValeurExcel(f.lieu_reception),
+        ref_fournisseur: nettoyerValeurExcel(f.reference_commande_fournisseur)
       });
 
       row.eachCell((cell) => {
