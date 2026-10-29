@@ -300,23 +300,24 @@ export default function PageChantier() {
 
     const dateValGlobal = (chantier.statut === "valide" || chantier.statut === "commande_passee") && chantier.date_validation 
       ? formaterDate(chantier.date_validation) 
-      : "En attente";
+      : "";
 
     fournitures.forEach((f) => {
+      // CORRECTION : On remplace tous les || "-" par || "" pour éviter l'erreur de formule Excel
       const row = worksheet.addRow({
-        fournisseur: f.fournisseur || "-",
-        article: f.designation,
-        reference: f.reference || "-",
-        quantite: f.quantite,
-        question: f.question_artisan || "-",
-        reponse: f.reponse_client || "-",
-        lien: f.lien || "-",
+        fournisseur: f.fournisseur || "",
+        article: f.designation || "",
+        reference: f.reference || "",
+        quantite: f.quantite || "",
+        question: f.question_artisan || "",
+        reponse: f.reponse_client || "",
+        lien: f.lien || "",
         statut: f.refuse ? "Refusé" : "Validé",
         date_val: dateValGlobal,
         commande: f.commande_passee ? "Oui" : "Non",
-        date_reception: f.reception_a_definir ? "À définir" : (f.date_reception ? formaterDateCourte(f.date_reception) : "-"),
-        lieu: f.lieu_reception || "-",
-        ref_fournisseur: f.reference_commande_fournisseur || "-"
+        date_reception: f.reception_a_definir ? "À définir" : (f.date_reception ? formaterDateCourte(f.date_reception) : ""),
+        lieu: f.lieu_reception || "",
+        ref_fournisseur: f.reference_commande_fournisseur || ""
       });
 
       row.eachCell((cell) => {
@@ -332,7 +333,7 @@ export default function PageChantier() {
     const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `Fournitures_${chantier.nom_client.replace(/\s+/g, '_')}.xlsx`;
+    link.download = `Fournitures_${(chantier.nom_client || "Chantier").replace(/\s+/g, '_')}.xlsx`;
     link.click();
   };
 
@@ -497,7 +498,6 @@ export default function PageChantier() {
         </div>
 
         <div>
-          {/* NOUVEAU : Affichage du commentaire global du client */}
           {chantier.commentaire_client && (
             <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 mb-6">
               <h3 className="font-bold text-blue-900 mb-1">💬 Remarque du client :</h3>
