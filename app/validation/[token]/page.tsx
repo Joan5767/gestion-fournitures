@@ -51,11 +51,18 @@ export default function PageValidationClient() {
   };
 
   const validerFournitures = async () => {
+    if (chantier.statut === "valide" || chantier.statut === "commande_passee" ||
+        !fournitures.some((item) => !item.est_valide && !item.commande_sans_validation_client && !item.commande_passee)) {
+      alert("Aucun article en attente de validation.");
+      return;
+    }
     setValidationEnCours(true);
     
     try {
       for (const item of fournitures) {
-        if (!item.est_valide) {
+        // Une commande exceptionnelle n'est jamais validée automatiquement par le client.
+        // Cet article reste explicitement « non validé par le client ».
+        if (!item.est_valide && !item.commande_sans_validation_client && !item.commande_passee) {
           const estRefuse = articlesRefuses.includes(item.id);
           const reponseClient = reponses[item.id] || null;
           
@@ -120,6 +127,11 @@ export default function PageValidationClient() {
   if (!chantier) return <div className="p-10 text-center text-red-500">Lien invalide.</div>;
 
   const toutEstValide = chantier.statut === "valide" || chantier.statut === "commande_passee";
+  const aDesCommandesExceptionnelles = fournitures.some((f) => f.commande_sans_validation_client);
+  const articlesRestantAValider = fournitures.filter((f) =>
+    !f.est_valide && !f.commande_sans_validation_client && !f.commande_passee
+  );
+  const validationPossible = !toutEstValide && articlesRestantAValider.length > 0;
 
   return (
     <div className="max-w-3xl mx-auto p-4 md:p-6 mt-10 bg-white shadow-lg rounded-lg border">
@@ -128,23 +140,29 @@ export default function PageValidationClient() {
 
       <div className="bg-gray-50 p-4 rounded-md mb-6 border">
         <h2 className="font-semibold mb-2 border-b pb-2">Matériel prévu :</h2>
-        {!toutEstValide && <p className="text-sm text-blue-600 mb-4 font-medium">Veuillez vérifier les articles ci-dessous. Ils sont tous inclus par défaut. Si vous ne souhaitez pas un article, cliquez sur "Refuser".</p>}
+        {validationPossible && <p className="text-sm text-blue-600 mb-4 font-medium">Veuillez vérifier les articles non encore validés ci-dessous. Si vous ne souhaitez pas un article, cliquez sur « Refuser ».</p>}
+        {aDesCommandesExceptionnelles && (
+          <p className="text-sm text-amber-900 border border-amber-300 bg-amber-50 rounded p-3 mb-4">
+            ⚠️ Certains articles ont été commandés par l'entreprise <strong>sans validation de votre part dans cette application</strong>. Ils sont identifiés individuellement avec le motif déclaré par l'entreprise. Leurs commandes ne sont pas couvertes par votre validation des autres articles.
+          </p>
+        )}
         
         <ul className="space-y-4">
           {fournitures.map((item) => {
             const estRefuse = articlesRefuses.includes(item.id);
-            const estVerrouille = item.est_valide;
-            const estCommande = item.commande_passee; 
+            const estVerrouille = item.est_valide || item.commande_sans_validation_client;
+            const estCommande = item.commande_passee;
+            const estException = Boolean(item.commande_sans_validation_client); 
 
             return (
-              <li key={item.id} className={`flex flex-col p-4 rounded border transition-colors ${estRefuse ? "bg-red-50 border-red-200" : estVerrouille ? "bg-green-50 border-green-100" : "bg-white"}`}>
+              <li key={item.id} className={`flex flex-col p-4 rounded border transition-colors ${estException ? "bg-amber-50 border-amber-300" : estRefuse ? "bg-red-50 border-red-200" : estVerrouille ? "bg-green-50 border-green-100" : "bg-white"}`}>
                 
                 <div className="flex gap-4">
                   {item.photo_url && (
-                    <img src={item.photo_url} alt="Photo produit" className={`w-24 h-24 object-cover rounded border flex-shrink-0 ${estRefuse ? "opacity-50 grayscale" : ""}`} />
+                    <img src={item.photo_url} alt="Photo produit" className={`w-24 h-24 object-cover rounded border flex-shrink-0 ${estRefuse && !estException ? "opacity-50 grayscale" : ""}`} />
                   )}
                   
-                  <div className={`flex-1 flex flex-col justify-center ${estRefuse ? "line-through opacity-70" : ""}`}>
+                  <div className={`flex-1 flex flex-col justify-center ${estRefuse && !estException ? "line-through opacity-70" : ""}`}>
                     <span className="font-bold text-lg">{item.designation}</span>
                     <div className="text-sm text-gray-600 mt-1 grid grid-cols-1 gap-1">
                       <span className="font-medium text-black">Quantité : {item.quantite}</span>
@@ -155,7 +173,12 @@ export default function PageValidationClient() {
                   </div>
                   
                   <div className="flex flex-col items-center justify-center border-l pl-4 min-w-[120px]">
-                    {estCommande ? (
+                    {estException ? (
+                      <div className="text-center text-amber-950 max-w-[145px]">
+                        <span className="text-2xl">⚠️</span>
+                        <span className="block text-xs font-bold mt-1">Commandé par l'entreprise SANS validation du client</span>
+                      </div>
+                    ) : estCommande ? (
                       <div className="text-center">
                         <span className="text-2xl" title="Article en cours de commande">🔒</span>
                         <span className="block text-xs font-bold text-blue-700 mt-1">Commandé</span>
@@ -187,6 +210,13 @@ export default function PageValidationClient() {
                   </div>
                 </div>
 
+                {estException && (
+                  <div className="mt-4 p-3 bg-amber-100 border border-amber-300 rounded text-sm">
+                    <p className="font-bold text-amber-950">{item.refuse ? "Article initialement refusé par le client, commandé malgré ce refus" : "Commande sans validation du client"}</p>
+                    <p className="mt-1 text-amber-900 whitespace-pre-wrap">Motif indiqué par l'entreprise : {item.justification_commande_sans_validation || "Non renseigné"}</p>
+                    {item.date_commande_sans_validation && <p className="text-xs mt-1 text-amber-800">Commande enregistrée le {new Date(item.date_commande_sans_validation).toLocaleString("fr-FR", { timeZone: "Europe/Paris", dateStyle: "short", timeStyle: "short" })}</p>}
+                  </div>
+                )}
                 {item.question_artisan && (
                   <div className={`mt-4 bg-blue-50 p-3 rounded-lg border border-blue-200 ${estRefuse ? "opacity-50" : ""}`}>
                     <p className="text-sm font-semibold text-blue-900 mb-2">
@@ -219,7 +249,7 @@ export default function PageValidationClient() {
         )}
 
         {/* MODIFICATION : Champ uniquement pour AJOUTER un nouveau message */}
-        {!toutEstValide && (
+        {validationPossible && (
           <textarea
             className="w-full border border-gray-300 p-3 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             rows={3}
@@ -230,9 +260,11 @@ export default function PageValidationClient() {
         )}
       </div>
 
-      {toutEstValide ? (
-        <div className="bg-green-100 text-green-800 p-4 rounded-md text-center font-bold shadow-inner">
-          ✅ Vous avez validé toutes les fournitures. Merci !
+      {!validationPossible ? (
+        <div className="bg-gray-100 text-gray-800 p-4 rounded-md text-center font-semibold border">
+          {aDesCommandesExceptionnelles
+            ? "Les articles identifiés comme commandes sans validation client ne sont pas considérés comme approuvés par vous. Aucune action supplémentaire n'est demandée pour ces commandes."
+            : toutEstValide ? "Vos fournitures ont été validées. Merci !" : "Aucun article n'est actuellement à valider."}
         </div>
       ) : (
         <button 
@@ -240,7 +272,7 @@ export default function PageValidationClient() {
           disabled={validationEnCours}
           className={`w-full text-white font-bold py-4 rounded-md shadow-md transition-colors ${validationEnCours ? "bg-blue-400" : "bg-blue-600 hover:bg-blue-700"}`}
         >
-          {validationEnCours ? "Validation en cours..." : "Je valide mes choix et mes réponses"}
+          {validationEnCours ? "Validation en cours..." : "Je valide uniquement les articles en attente et mes réponses"}
         </button>
       )}
     </div>

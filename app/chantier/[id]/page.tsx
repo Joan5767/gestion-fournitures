@@ -35,6 +35,12 @@ export default function PageChantier() {
   const [refCommandeBulk, setRefCommandeBulk] = useState("");
   const [receptionADefinirBulk, setReceptionADefinirBulk] = useState(false);
 
+  // Une commande exceptionnelle ne constitue PAS une validation du client.
+  const [articleCommandeExceptionnelle, setArticleCommandeExceptionnelle] = useState<string | null>(null);
+  const [motifCommandeExceptionnelle, setMotifCommandeExceptionnelle] = useState("");
+  const [enregistrementExceptionEnCours, setEnregistrementExceptionEnCours] = useState(false);
+  const [editionMotifException, setEditionMotifException] = useState(false);
+
   // Consignes pour le conducteur de travaux : enregistrees dans les memos existants
   // du chantier pour eviter toute modification du schema de la base Supabase.
   const ID_CONSIGNES_CONDUCTEUR = "fiche_chantier_conducteur";
@@ -194,37 +200,132 @@ export default function PageChantier() {
     }
   }
 
+  // Rétablir l'état « validé » après une commande exceptionnelle si la liste
+  // avait déjà été validée et qu'il ne reste aucun article à faire valider.
+  // Cet état de chantier ne signifie PAS que les commandes exceptionnelles
+  // sont approuvées : seul « est_valide » enregistre l'accord du client.
+  async function actualiserStatutApresCommandeExceptionnelle() {
+    if (!chantier || chantier.statut !== "brouillon") return;
+    const historiquePresent = Boolean(chantier.date_validation) ||
+      (Array.isArray(chantier.historique_validations) && chantier.historique_validations.length > 0);
+    if (!historiquePresent) return;
+
+    const { data, error } = await supabase.from("fournitures")
+      .select("est_valide,commande_sans_validation_client,commande_passee,refuse")
+      .eq("chantier_id", id);
+    if (error || !data) return;
+    const aucunArticleEnAttente = data.every((item: any) =>
+      item.est_valide || item.commande_sans_validation_client
+    );
+    if (aucunArticleEnAttente) {
+      const avaitEteCloture = Array.isArray(chantier.historique_commandes) &&
+        chantier.historique_commandes.length > 0;
+      const toutesCommandesPassees = data.every((article: any) => article.refuse || article.commande_passee);
+      // Si le dossier avait déjà été clôturé et que tout est commandé,
+      // ne pas relancer inutilement les e-mails de rappel.
+      const prochainStatut = avaitEteCloture && toutesCommandesPassees ? "commande_passee" : "valide";
+      const { error: erreurStatut } = await supabase.from("chantiers")
+        .update({ statut: prochainStatut }).eq("id", id).eq("statut", "brouillon");
+      if (erreurStatut) {
+        alert("Commande enregistrée, mais le statut du chantier n'a pas pu être actualisé : " + erreurStatut.message);
+      }
+    }
+  }
+
   async function marquerArticleCommande(idFourniture: string, statutActuel: boolean) {
+    const article = fournitures.find((item) => item.id === idFourniture);
+    if (!article) return;
+
     if (statutActuel) {
-      const confirmation = window.confirm("Voulez-vous vraiment annuler la commande et changer le statut en 'à commander' ?");
-      if (!confirmation) return; 
+      const confirmation = window.confirm("Annuler cette commande ? Son statut exceptionnel et son motif ne seront plus affichés sur les documents futurs.");
+      if (!confirmation) return;
+    } else if (!article.est_valide || article.refuse) {
+      // Un article non validé OU refusé exige un motif avant la commande.
+      setArticleCommandeExceptionnelle(idFourniture);
+      setEditionMotifException(false);
+      setMotifCommandeExceptionnelle("");
+      return;
     }
 
-    const nouvelleDate = !statutActuel ? new Date().toISOString() : null;
+    const { error } = await supabase.from("fournitures").update({
+      commande_passee: !statutActuel,
+      date_commande: !statutActuel ? new Date().toISOString() : null,
+      ...(statutActuel ? {
+        date_reception: null,
+        lieu_reception: null,
+        reference_commande_fournisseur: null,
+        reception_a_definir: false,
+        commande_sans_validation_client: false,
+        justification_commande_sans_validation: null,
+        date_commande_sans_validation: null
+      } : {})
+    }).eq("id", idFourniture);
 
-    const { error } = await supabase
-      .from("fournitures")
-      .update({ 
-        commande_passee: !statutActuel,
-        date_commande: nouvelleDate,
-        ...(statutActuel && { 
-          date_reception: null, 
-          lieu_reception: null, 
-          reference_commande_fournisseur: null, 
-          reception_a_definir: false 
-        })
-      })
-      .eq("id", idFourniture);
-    
-    if (!error) {
-      setArticlesSelectionnes(prev => prev.filter(id => id !== idFourniture));
-      fetchChantierEtFournitures();
-    } else {
+    if (error) {
       alert("Erreur lors de la mise à jour de l'article : " + error.message);
+      return;
+    }
+    setArticlesSelectionnes((precedents) => precedents.filter((articleId) => articleId !== idFourniture));
+    await fetchChantierEtFournitures();
+  }
+
+  async function confirmerCommandeSansValidation(e: React.FormEvent) {
+    e.preventDefault();
+    if (!articleCommandeExceptionnelle || enregistrementExceptionEnCours) return;
+    const motif = motifCommandeExceptionnelle.trim();
+    if (!motif) {
+      alert("Indique la raison de la commande sans validation du client.");
+      return;
+    }
+
+    setEnregistrementExceptionEnCours(true);
+    const date = new Date().toISOString();
+    try {
+      // En édition, on corrige uniquement le motif, jamais la date de commande
+      // ni l'indicateur de validation du client.
+      const miseAJour = editionMotifException ? {
+        justification_commande_sans_validation: motif
+      } : {
+        commande_passee: true,
+        date_commande: date,
+        commande_sans_validation_client: true,
+        justification_commande_sans_validation: motif,
+        date_commande_sans_validation: date
+        // Ne jamais écrire « est_valide: true » : seul le client peut valider.
+      };
+      let requete = supabase.from("fournitures")
+        .update(miseAJour).eq("id", articleCommandeExceptionnelle);
+      if (editionMotifException) {
+        requete = requete.eq("commande_sans_validation_client", true);
+      } else if (fournitures.find((article) => article.id === articleCommandeExceptionnelle)?.refuse) {
+        // Un refus enregistré par le client est conservé comme tel.
+        requete = requete.eq("refuse", true);
+      } else {
+        requete = requete.eq("est_valide", false);
+      }
+      const { data, error } = await requete.select("id");
+      if (error) throw error;
+      if (!data || data.length !== 1) {
+        throw new Error("Cet article a changé depuis l'ouverture de la fenêtre. Actualise la liste.");
+      }
+
+      if (!editionMotifException) await actualiserStatutApresCommandeExceptionnelle();
+      setArticleCommandeExceptionnelle(null);
+      setEditionMotifException(false);
+      setMotifCommandeExceptionnelle("");
+      await fetchChantierEtFournitures();
+    } catch (erreur: any) {
+      alert("Impossible d'enregistrer cette commande : " + (erreur?.message || "Erreur inconnue"));
+    } finally {
+      setEnregistrementExceptionEnCours(false);
     }
   }
 
   async function marquerCommandePassee() {
+    if (fournitures.some((article) => (!article.refuse || article.commande_sans_validation_client) && !article.commande_passee)) {
+      alert("Impossible de clôturer : certaines fournitures ne sont pas encore commandées.");
+      return;
+    }
     const currentDate = new Date().toISOString();
     const historiqueActuel = chantier.historique_commandes || [];
     const nouvelHistorique = [...historiqueActuel, currentDate];
@@ -366,7 +467,10 @@ export default function PageChantier() {
       { header: 'Commandé', key: 'commande', width: 15 },
       { header: 'Date Réception', key: 'date_reception', width: 20 },
       { header: 'Lieu de Retrait', key: 'lieu', width: 25 },
-      { header: 'Réf. Cde Frs', key: 'ref_fournisseur', width: 20 }
+      { header: 'Réf. Cde Frs', key: 'ref_fournisseur', width: 20 },
+      { header: 'Mode de validation', key: 'mode_validation', width: 30 },
+      { header: 'Motif commande sans validation client', key: 'motif_exception', width: 55 },
+      { header: 'Date commande sans validation', key: 'date_exception', width: 26 }
     ];
 
     worksheet.getRow(1).eachCell((cell) => {
@@ -380,9 +484,9 @@ export default function PageChantier() {
     });
     worksheet.getRow(1).height = 30;
 
-    const dateValGlobal = (chantier.statut === "valide" || chantier.statut === "commande_passee") && chantier.date_validation 
-      ? formaterDate(chantier.date_validation) 
-      : "";
+    // La date de validation d'un article validé reste visible même si une
+    // modification ultérieure a remis temporairement le chantier en brouillon.
+    const dateValGlobal = chantier.date_validation ? formaterDate(chantier.date_validation) : "";
 
     fournitures.forEach((f) => {
       // Chaque champ venant d'un fournisseur ou d'un client est nettoye
@@ -395,16 +499,26 @@ export default function PageChantier() {
         question: nettoyerValeurExcel(f.question_artisan),
         reponse: nettoyerValeurExcel(f.reponse_client),
         lien: nettoyerValeurExcel(f.lien),
-        statut: f.refuse ? "Refusé" : "Validé",
-        date_val: dateValGlobal,
+        statut: f.commande_sans_validation_client ? (f.refuse ? "REFUSÉ / NON VALIDÉ PAR LE CLIENT POUR COMMANDE" : "NON VALIDÉ PAR LE CLIENT") :
+          f.refuse ? "Refusé par le client" : f.est_valide ? "Validé par le client" : "En attente de validation",
+        date_val: f.est_valide && !f.commande_sans_validation_client ? dateValGlobal : "",
         commande: f.commande_passee ? "Oui" : "Non",
         date_reception: f.reception_a_definir ? "À définir" : (f.date_reception ? formaterDateCourte(f.date_reception) : ""),
         lieu: nettoyerValeurExcel(f.lieu_reception),
-        ref_fournisseur: nettoyerValeurExcel(f.reference_commande_fournisseur)
+        ref_fournisseur: nettoyerValeurExcel(f.reference_commande_fournisseur),
+        mode_validation: f.commande_sans_validation_client ? "Commande par l'entreprise, SANS accord client dans l'application" :
+          f.est_valide ? "Validation du client" : "Non validé",
+        motif_exception: f.commande_sans_validation_client ? nettoyerValeurExcel(f.justification_commande_sans_validation) : "",
+        date_exception: f.commande_sans_validation_client && f.date_commande_sans_validation
+          ? formaterDate(f.date_commande_sans_validation) : ""
       });
 
       row.eachCell((cell) => {
         cell.alignment = { vertical: 'top', wrapText: true };
+        if (typeof cell.value === "string" && cell.value.includes("NON VALIDÉ PAR LE CLIENT")) {
+          cell.font = { bold: true, color: { argb: "FF9A3412" } };
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFEDD5" } };
+        }
         cell.border = {
           top: { style: 'thin' }, left: { style: 'thin' },
           bottom: { style: 'thin' }, right: { style: 'thin' }
@@ -472,7 +586,11 @@ export default function PageChantier() {
 
       // Inclure toutes les lignes, en signalant les fournitures refusees.
       const lignes = fournitures.map((article) => [
-        `${nettoyerValeurExcel(article.designation || "Article sans nom")}${article.refuse ? " (REFUSÉ)" : ""}`,
+        [nettoyerValeurExcel(article.designation || "Article sans nom"),
+         article.refuse ? "REFUSÉ PAR LE CLIENT" : "",
+         article.commande_sans_validation_client
+           ? `NON VALIDÉ PAR LE CLIENT - Commandé par l'entreprise. Motif : ${nettoyerValeurExcel(article.justification_commande_sans_validation || "Non renseigné")}`
+           : ""].filter(Boolean).join("\n"),
         nettoyerValeurExcel(article.quantite),
         article.reception_a_definir
           ? "À définir"
@@ -616,8 +734,11 @@ export default function PageChantier() {
   };
 
   const telechargerPreuvePDF = () => {
-    if (chantier.statut !== "valide" && chantier.statut !== "commande_passee") {
-      alert("Le chantier n'a pas encore été validé par le client.");
+    const aDesCommandesExceptionnelles = fournitures.some((article) => article.commande_sans_validation_client);
+    const aDesValidationsClient = Boolean(chantier.date_validation) ||
+      (Array.isArray(chantier.historique_validations) && chantier.historique_validations.length > 0);
+    if (!aDesValidationsClient && !aDesCommandesExceptionnelles) {
+      alert("Aucune validation client ni commande exceptionnelle enregistrée pour ce chantier.");
       return;
     }
 
@@ -653,17 +774,17 @@ export default function PageChantier() {
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(17);
-    doc.text("Certificat de validation des fournitures", marge, 20);
+    doc.text("Preuve de validation et suivi des commandes", marge, 20);
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(11);
     doc.text(`Chantier / Client : ${chantier.nom_client || "Non renseigné"}`, marge, 29);
     doc.text(
-      `Dernière validation enregistrée : ${datesValidations.length ? formaterHorodatage(datesValidations[datesValidations.length - 1]) : "Date inconnue"}`,
+      `Dernière validation du client : ${datesValidations.length ? formaterHorodatage(datesValidations[datesValidations.length - 1]) : "Aucune validation enregistrée"}`,
       marge, 36
     );
     doc.setFontSize(9);
-    doc.text("Ce document présente les validations enregistrées et la liste actuelle des fournitures approuvées.", marge, 42);
+    doc.text("Les commandes signalées SANS validation du client ne constituent pas un accord client.", marge, 42);
 
     // Historique complet, y compris après ajout ou modification de fournitures.
     doc.setFont("helvetica", "bold");
@@ -703,27 +824,42 @@ export default function PageChantier() {
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
-    doc.text("FOURNITURES VALIDÉES - LISTE ACTUELLE", marge, titreFournituresY);
+    doc.text("LISTE ACTUELLE - VALIDATIONS CLIENT ET COMMANDES EXCEPTIONNELLES", marge, titreFournituresY);
 
-    const colonnes = ["Désignation", "Qté", "Fournisseur", "Référence", "Réponse Client"];
+    const colonnes = ["Article", "Qté", "Fournisseur", "Référence", "Réponse client", "Statut / justification"];
     const lignes = fournitures
-      .filter((item) => !item.refuse)
+      .filter((item) => item.commande_sans_validation_client || (item.est_valide && !item.refuse))
       .map((item) => [
-        item.designation || "-",
-        item.quantite || "-",
-        item.fournisseur || "-",
-        item.reference || "-",
-        item.reponse_client || "-"
+        nettoyerValeurExcel(item.designation) || "-",
+        nettoyerValeurExcel(item.quantite) || "-",
+        nettoyerValeurExcel(item.fournisseur) || "-",
+        nettoyerValeurExcel(item.reference) || "-",
+        nettoyerValeurExcel(item.reponse_client) || "-",
+        item.commande_sans_validation_client
+          ? `${item.refuse ? "REFUSÉ PAR LE CLIENT - " : ""}NON VALIDÉ PAR LE CLIENT pour cette commande. Commandé par l'entreprise le ${item.date_commande_sans_validation ? formaterHorodatage(new Date(item.date_commande_sans_validation)) : "date inconnue"}. Motif : ${nettoyerValeurExcel(item.justification_commande_sans_validation) || "Non renseigné"}`
+          : "Validé par le client"
       ]);
 
     autoTable(doc, {
       head: [colonnes],
-      body: lignes.length ? lignes : [["Aucune fourniture validée", "", "", "", ""]],
+      body: lignes.length ? lignes : [["Aucune fourniture avec validation ou commande", "", "", "", "", ""]],
       startY: titreFournituresY + 4,
       margin: { left: marge, right: marge, top: 18, bottom: 18 },
       theme: "grid",
-      styles: { font: "helvetica", fontSize: 9, cellPadding: 2.5, overflow: "linebreak" },
-      headStyles: { fillColor: [41, 128, 185] }
+      styles: { font: "helvetica", fontSize: 8, cellPadding: 2.3, overflow: "linebreak", valign: "top" },
+      headStyles: { fillColor: [41, 128, 185] },
+      columnStyles: {
+        0: { cellWidth: 36 }, 1: { cellWidth: 11 }, 2: { cellWidth: 24 },
+        3: { cellWidth: 20 }, 4: { cellWidth: 30 }, 5: { cellWidth: 61 }
+      },
+      didParseCell: (cell) => {
+        if (cell.section === "body" && cell.column.index === 5 &&
+            lignes[cell.row.index]?.[5]?.includes("NON VALIDÉ PAR LE CLIENT")) {
+          cell.cell.styles.textColor = [154, 52, 18];
+          cell.cell.styles.fillColor = [255, 237, 213];
+          cell.cell.styles.fontStyle = "bold";
+        }
+      }
     });
 
     // Pied de page numéroté pour les historiques et listes sur plusieurs pages.
@@ -751,20 +887,56 @@ export default function PageChantier() {
   if (!chantier) return <div className="p-8 font-bold">Chargement...</div>;
   const lienValidation = typeof window !== "undefined" ? `${window.location.origin}/validation/${chantier.token_validation}` : "";
 
+  const articleException = fournitures.find((article) => article.id === articleCommandeExceptionnelle);
+
   return (
     <div className="p-8 max-w-6xl mx-auto">
+      {articleException && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="titre-commande-exceptionnelle">
+          <form onSubmit={confirmerCommandeSansValidation} className="bg-white w-full max-w-xl rounded-lg shadow-xl p-6 space-y-4">
+            <h2 id="titre-commande-exceptionnelle" className="text-xl font-bold text-amber-900">{editionMotifException ? "Modifier le motif de la commande" : "Commande sans validation du client"}</h2>
+            <p className="text-sm text-gray-800">Article : <strong>{articleException.designation}</strong></p>
+            <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 p-3 rounded">
+              {articleException.refuse ? "Cet article a été REFUSÉ par le client dans l'application. La commande restera identifiée comme exceptionnelle, malgré ce refus." : "Cet article n'a pas été validé par le client dans l'application."} La commande sera signalée comme <strong>NON VALIDÉE PAR LE CLIENT</strong> sur son lien et dans les exports Excel et PDF.
+              L'indication du motif ne transforme pas la commande en validation du client.
+            </p>
+            <div>
+              <label htmlFor="motif-commande-exceptionnelle" className="block text-sm font-semibold mb-2">Motif / explication (obligatoire)</label>
+              <textarea
+                id="motif-commande-exceptionnelle"
+                className="w-full min-h-28 p-3 border rounded focus:ring-2 focus:ring-amber-500"
+                value={motifCommandeExceptionnelle}
+                onChange={(e) => setMotifCommandeExceptionnelle(e.target.value)}
+                placeholder="Ex. : Accord communiqué par téléphone le 10/10/2026 ou par e-mail le 24/10/2026. Préciser la personne et les circonstances."
+                rows={4}
+                maxLength={2000}
+                required
+              />
+            </div>
+            <div className="flex flex-wrap justify-end gap-3">
+              <button type="button" onClick={() => { setArticleCommandeExceptionnelle(null); setEditionMotifException(false); setMotifCommandeExceptionnelle(""); }} disabled={enregistrementExceptionEnCours} className="px-4 py-2 bg-gray-100 rounded border">Annuler</button>
+              <button type="submit" disabled={enregistrementExceptionEnCours || !motifCommandeExceptionnelle.trim()} className="px-4 py-2 bg-amber-700 text-white rounded font-bold disabled:opacity-50">
+                {enregistrementExceptionEnCours ? "Enregistrement..." : editionMotifException ? "Enregistrer le motif corrigé" : "Confirmer la commande sans validation client"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
       <Link href="/" className="text-gray-500 hover:text-black mb-6 inline-block font-bold">&larr; Retour</Link>
       
       <div className="flex justify-between items-start mb-8 pb-4 border-b">
         <div>
           <h1 className="text-3xl font-bold">{chantier.nom_client}</h1>
           <p className="text-gray-600 mt-1">STATUT : <strong className="uppercase">{chantier.statut === 'brouillon' ? 'EN COURS DE MODIFICATION' : chantier.statut}</strong></p>
+          {fournitures.some((article) => article.commande_sans_validation_client) && (
+            <p className="text-amber-900 font-semibold text-sm mt-2">⚠️ Ce chantier contient des commandes NON VALIDÉES PAR LE CLIENT (motifs détaillés ci-dessous).</p>
+          )}
         </div>
         <div className="text-right flex flex-col items-end gap-2">
            <div className="flex gap-2 flex-wrap justify-end">
              <button onClick={exporterVersExcel} className="bg-green-600 text-white px-4 py-2 rounded font-bold hover:bg-green-700">📊 Exporter Excel</button>
              <button onClick={exporterFicheChantierPDF} disabled={generationFicheEnCours} className="bg-indigo-700 text-white px-4 py-2 rounded font-bold hover:bg-indigo-800 disabled:opacity-60">{generationFicheEnCours ? "Preparation du PDF..." : "📄 Fiche chantier PDF"}</button>
-             {(chantier.statut === "valide" || chantier.statut === "commande_passee") && (
+             {(Boolean(chantier.date_validation) || (Array.isArray(chantier.historique_validations) && chantier.historique_validations.length > 0) || fournitures.some((f) => f.commande_sans_validation_client)) && (
                <button onClick={telechargerPreuvePDF} className="bg-blue-600 text-white px-4 py-2 rounded font-bold hover:bg-blue-700">📄 Preuve PDF</button>
              )}
            </div>
@@ -1019,6 +1191,18 @@ export default function PageChantier() {
                           </div>
                         )}
 
+                        {item.commande_sans_validation_client && (
+                          <div className="mt-3 bg-amber-50 border border-amber-300 rounded p-3 text-sm">
+                            <p className="font-bold text-amber-950">⚠️ Commandé SANS validation du client</p>
+                            <p className="text-amber-900 mt-1 whitespace-pre-wrap">Motif : {item.justification_commande_sans_validation || "Non renseigné"}</p>
+                            {item.date_commande_sans_validation && <p className="text-xs text-amber-800 mt-1">Enregistré le {formaterDate(item.date_commande_sans_validation)}</p>}
+                            <button type="button" onClick={() => {
+                              setArticleCommandeExceptionnelle(item.id);
+                              setEditionMotifException(true);
+                              setMotifCommandeExceptionnelle(item.justification_commande_sans_validation || "");
+                            }} className="text-sm underline text-amber-900 mt-2">Corriger le motif</button>
+                          </div>
+                        )}
                         {item.refuse && <span className="text-xs font-bold text-red-600 block mt-2">❌ REFUSÉ</span>}
                         
                         {(item.date_reception || item.reception_a_definir || item.lieu_reception || item.reference_commande_fournisseur) && (
@@ -1037,7 +1221,7 @@ export default function PageChantier() {
                       </div>
                     </div>
                     
-                    {!item.refuse && (
+                    {(!item.refuse || item.commande_sans_validation_client || !item.commande_passee) && (
                       <div className="mt-4 pt-3 border-t flex justify-between items-center">
                         <div>
                           <span className="text-sm font-medium text-gray-600 block">État de la commande :</span>
@@ -1053,7 +1237,7 @@ export default function PageChantier() {
                               : "bg-gray-200 text-gray-800 hover:bg-gray-300"
                           }`}
                         >
-                          {item.commande_passee ? "✅ Commandé" : "⏳ À commander"}
+                          {item.commande_passee ? "✅ Commandé" : item.refuse ? "⚠️ Commander malgré le refus" : "⏳ À commander"}
                         </button>
                       </div>
                     )}
@@ -1063,9 +1247,11 @@ export default function PageChantier() {
             )}
           </div>
           
-          {chantier.statut === "valide" && (
+          {chantier.statut !== "commande_passee" && fournitures.length > 0 &&
+            fournitures.filter((f) => !f.refuse || f.commande_sans_validation_client).length > 0 &&
+            fournitures.filter((f) => !f.refuse || f.commande_sans_validation_client).every((f) => f.commande_passee) && (
             <div className="mt-6 p-6 border rounded-lg bg-green-50 border-green-200 text-center">
-               <p className="text-sm text-green-800 mb-3">Toutes les fournitures ont été commandées ?</p>
+               <p className="text-sm text-green-800 mb-3">Toutes les fournitures retenues sont marquées « commandées ». Clôturer les commandes n'implique aucune validation du client pour les articles signalés comme exceptions.</p>
                <button onClick={marquerCommandePassee} className="w-full bg-green-600 text-white py-3 rounded font-bold hover:bg-green-700">
                 Clôturer les commandes (Arrêter les rappels)
               </button>
