@@ -581,7 +581,7 @@ export default function PageChantier() {
         "Quantité",
         "Date de réception",
         "Fournisseur / lieu de retrait",
-        "Référence",
+        "Référence de commande",
         "Question posée",
         "Réponse client"
       ];
@@ -589,6 +589,7 @@ export default function PageChantier() {
       // Inclure toutes les lignes, en signalant les fournitures refusees.
       const lignes = fournitures.map((article) => [
         [nettoyerValeurExcel(article.designation || "Article sans nom"),
+         article.reference ? `Réf. produit : ${nettoyerValeurExcel(article.reference)}` : "",
          article.refuse ? "REFUSÉ PAR LE CLIENT" : "",
          article.commande_sans_validation_client
            ? `NON VALIDÉ PAR LE CLIENT - Commandé par l'entreprise. Motif : ${nettoyerValeurExcel(article.justification_commande_sans_validation || "Non renseigné")}`
@@ -601,7 +602,7 @@ export default function PageChantier() {
             : "Non renseignée",
         [article.fournisseur ? `Fournisseur : ${nettoyerValeurExcel(article.fournisseur)}` : "",
          article.lieu_reception ? `Retrait : ${nettoyerValeurExcel(article.lieu_reception)}` : ""].filter(Boolean).join("\n") || "-",
-        nettoyerValeurExcel(article.reference) || "-",
+        nettoyerValeurExcel(article.reference_commande_fournisseur) || "-",
         nettoyerValeurExcel(article.question_artisan) || "-",
         nettoyerValeurExcel(article.reponse_client) || "-"
       ]);
