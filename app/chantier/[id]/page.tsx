@@ -631,6 +631,8 @@ export default function PageChantier() {
         head: [colonnes],
         body: lignes.length ? lignes : [["Aucune fourniture", "", "", "", "", "", ""]],
         startY: 37,
+        // Ne jamais couper un article entre deux pages : sa photo reste avec sa description.
+        rowPageBreak: "avoid",
         margin: { top: 16, right: marge, bottom: 17, left: marge },
         theme: "grid",
         tableWidth: largeurPage - 2 * marge,
@@ -662,29 +664,55 @@ export default function PageChantier() {
           6: { cellWidth: 52 }
         },
         didParseCell: (donnees) => {
-          if (donnees.section === "body" && donnees.column.index === 0 && photos[donnees.row.index]) {
-            // Garder une zone libre sous le texte pour l'image (18 mm).
-            const texte = String(lignes[donnees.row.index]?.[0] || "");
-            const nbLignes = doc.splitTextToSize(texte, 58).length;
-            donnees.cell.styles.minCellHeight = Math.max(27, nbLignes * 3.3 + 23);
-          }
+          if (donnees.section !== "body" || donnees.column.index !== 0 || !photos[donnees.row.index]) return;
+
+          // Réserver explicitement la place du texte ET de la photo dans la même ligne.
+          // Sans cette réserve, une ligne longue en bas de page peut se couper et
+          // la photo de 18 mm risque de masquer la désignation ou l'article suivant.
+          const largeurTexte = 63 - 2 * 2.1;
+          const texte = String(lignes[donnees.row.index]?.[0] || "");
+          const lignesTexte = doc.splitTextToSize(texte, largeurTexte);
+          const hauteurLigne = (8 / doc.internal.scaleFactor) * doc.getLineHeightFactor();
+          const hauteurTexte = lignesTexte.length * hauteurLigne;
+          const margeInterieure = 2 * 2.1;
+          const espaceTextePhoto = 3;
+          const hauteurPhoto = 18;
+          donnees.cell.styles.minCellHeight = Math.max(
+            30,
+            hauteurTexte + margeInterieure + espaceTextePhoto + hauteurPhoto + 3
+          );
         },
         didDrawCell: (donnees) => {
           if (donnees.section !== "body" || donnees.column.index !== 0) return;
           const photo = photos[donnees.row.index];
           if (!photo) return;
+
           try {
-            // Photo sous la designation, sans deformation de ses proportions.
-            const facteurPhoto = Math.min(18 / photo.largeur, 18 / photo.hauteur);
+            // Utiliser le nombre RÉEL de lignes calculé par autoTable, pas la hauteur
+            // de la cellule : ainsi la photo ne peut pas remonter sur le texte.
+            const hauteurLigne = (donnees.cell.styles.fontSize / doc.internal.scaleFactor) * doc.getLineHeightFactor();
+            const hauteurTexte = donnees.cell.text.length * hauteurLigne;
+            const margeHaute = 2.1;
+            const margeBasse = 2.1;
+            const debutPhoto = donnees.cell.y + margeHaute + hauteurTexte + 3;
+            const espaceDisponible = donnees.cell.y + donnees.cell.height - margeBasse - debutPhoto;
+
+            // Sécurité supplémentaire si un article exceptionnellement long
+            // doit être réparti malgré tout sur plusieurs pages.
+            if (espaceDisponible <= 0) return;
+            const facteurPhoto = Math.min(
+              18 / photo.largeur,
+              18 / photo.hauteur,
+              (donnees.cell.width - 2 * margeHaute) / photo.largeur,
+              espaceDisponible / photo.hauteur
+            );
             const largeurPhoto = photo.largeur * facteurPhoto;
             const hauteurPhoto = photo.hauteur * facteurPhoto;
-            doc.addImage(
-              photo.data, "JPEG",
-              donnees.cell.x + 2, donnees.cell.y + donnees.cell.height - 20,
-              largeurPhoto, hauteurPhoto
-            );
+            if (hauteurPhoto < 5) return;
+
+            doc.addImage(photo.data, "JPEG", donnees.cell.x + margeHaute, debutPhoto, largeurPhoto, hauteurPhoto);
           } catch {
-            // Une photo non compatible ne doit pas interrompre tout l'export.
+            // Une photo incompatible ne doit pas bloquer l'export PDF.
           }
         }
       });
